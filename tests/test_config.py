@@ -1,0 +1,78 @@
+from __future__ import annotations
+
+import os
+from unittest.mock import patch
+
+import pytest
+
+from bot import config
+
+pytestmark = pytest.mark.unit
+
+
+class TestLoad:
+    def test_loads_all_required_vars(self) -> None:
+        env = {
+            "TWITTER_BEARER_TOKEN": "bearer",
+            "TWITTER_HANDLE": "handle",
+            "BLUESKY_HANDLE": "bsky.social",
+            "BLUESKY_PASSWORD": "pass",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            config.load()
+
+        assert config.TWITTER_BEARER_TOKEN == "bearer"
+        assert config.TWITTER_HANDLE == "handle"
+        assert config.BLUESKY_HANDLE == "bsky.social"
+        assert config.BLUESKY_PASSWORD == "pass"
+
+    def test_exits_on_missing_required_var(self) -> None:
+        env = {
+            "TWITTER_BEARER_TOKEN": "bearer",
+            # TWITTER_HANDLE missing
+            "BLUESKY_HANDLE": "bsky.social",
+            "BLUESKY_PASSWORD": "pass",
+        }
+        # Ensure the var is not set from a previous test
+        clean_env = {k: v for k, v in env.items()}
+
+        with patch.dict(os.environ, clean_env, clear=True):
+            with pytest.raises(SystemExit):
+                config.load()
+
+    def test_exits_on_empty_required_var(self) -> None:
+        env = {
+            "TWITTER_BEARER_TOKEN": "",
+            "TWITTER_HANDLE": "handle",
+            "BLUESKY_HANDLE": "bsky.social",
+            "BLUESKY_PASSWORD": "pass",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            with pytest.raises(SystemExit):
+                config.load()
+
+    def test_optional_session_loaded(self) -> None:
+        env = {
+            "TWITTER_BEARER_TOKEN": "bearer",
+            "TWITTER_HANDLE": "handle",
+            "BLUESKY_HANDLE": "bsky.social",
+            "BLUESKY_PASSWORD": "pass",
+            "BLUESKY_SESSION": "my-session",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            config.load()
+
+        assert config.BLUESKY_SESSION == "my-session"
+
+    def test_optional_session_defaults_empty(self) -> None:
+        env = {
+            "TWITTER_BEARER_TOKEN": "bearer",
+            "TWITTER_HANDLE": "handle",
+            "BLUESKY_HANDLE": "bsky.social",
+            "BLUESKY_PASSWORD": "pass",
+        }
+        # Make sure BLUESKY_SESSION is not in the environment
+        with patch.dict(os.environ, env, clear=True):
+            config.load()
+
+        assert config.BLUESKY_SESSION == ""

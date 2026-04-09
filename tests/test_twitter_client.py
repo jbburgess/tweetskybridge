@@ -207,3 +207,27 @@ class TestFetchRecentTweets:
 
         assert len(tweets) == 1
         assert tweets[0].media == []
+
+    @patch("bot.twitter_client.save_twitter_user_id")
+    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
+    def test_returns_chronological_order(
+        self, mock_load: MagicMock, mock_save: MagicMock
+    ) -> None:
+        client = TwitterClient.__new__(TwitterClient)
+        client._client = MagicMock()
+
+        # Twitter API returns newest first: 300, 200, 100
+        tweet_objs = [
+            _make_tweepy_tweet(tweet_id=300, text="third"),
+            _make_tweepy_tweet(tweet_id=200, text="second"),
+            _make_tweepy_tweet(tweet_id=100, text="first"),
+        ]
+
+        client._client.get_users_tweets.return_value = SimpleNamespace(
+            data=tweet_objs,
+            includes=None,
+        )
+
+        tweets = client.fetch_recent_tweets()
+
+        assert [t.id for t in tweets] == ["100", "200", "300"]

@@ -49,7 +49,7 @@ class TwitterClient:
         log.info("Resolved @%s → user ID %s (cached)", config.TWITTER_HANDLE, user_id)
         return user_id
 
-    def fetch_recent_tweets(self, max_results: int = 3) -> list[Tweet]:
+    def fetch_recent_tweets(self, max_results: int = 5) -> list[Tweet]:
         """Fetch recent original tweets (no retweets/replies) with media metadata."""
         user_id = self._resolve_user_id()
 

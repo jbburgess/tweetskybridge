@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install linters
+        run: pip install ruff check-jsonschema yamllint
+
+      - name: Lint Python
+        run: ruff check .
+
+      - name: Lint JSON
+        run: |
+          for f in $(find . -name '*.json' -not -path './.git/*' -not -path './.venv/*'); do
+            python -m json.tool "$f" > /dev/null
+          done
+
+      - name: Lint YAML
+        run: yamllint -d relaxed .github/
+
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run unit tests
+        run: python -m pytest tests/ -v -m unit

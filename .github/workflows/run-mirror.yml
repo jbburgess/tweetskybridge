@@ -1,0 +1,64 @@
+name: X → Bluesky mirror
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: mirror
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Bluesky mirror bot
+        run: python main.py
+        env:
+          TWITTER_HANDLE:       ${{ secrets.TWITTER_HANDLE }}
+          TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
+          BLUESKY_HANDLE:       ${{ secrets.BLUESKY_HANDLE }}
+          BLUESKY_PASSWORD:     ${{ secrets.BLUESKY_PASSWORD }}
+          BLUESKY_SESSION:      ${{ secrets.BLUESKY_SESSION }}
+
+      - name: Commit & push updated seen_ids.json
+        run: |
+          # Configure git author
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Only commit if the state file actually changed
+          if git diff --quiet seen_ids.json; then
+            echo "No changes to seen_ids.json, skipping commit."
+            exit 0
+          fi
+
+          git add seen_ids.json
+          git commit -m "chore: update seen ids"
+
+          # Rewrite origin to include the GITHUB_TOKEN for auth
+          git remote set-url origin \
+            https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+
+          # Push back to the same branch
+          git push origin HEAD:${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash

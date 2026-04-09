@@ -7,7 +7,7 @@ import pytest
 import tweepy
 
 from bot import config
-from bot.twitter_client import MediaItem, Tweet, TwitterClient
+from bot.twitter_client import TwitterClient
 
 pytestmark = pytest.mark.unit
 

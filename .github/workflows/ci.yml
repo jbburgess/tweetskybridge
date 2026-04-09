@@ -25,9 +25,10 @@ jobs:
 
       - name: Lint JSON
         run: |
-          for f in $(find . -name '*.json' -not -path './.git/*' -not -path './.venv/*'); do
-            python -m json.tool "$f" > /dev/null
-          done
+          find . -name '*.json' \
+            -not -path './.git/*' \
+            -not -path './.venv/*' \
+            -exec python -m json.tool {} \; > /dev/null
 
       - name: Lint YAML
         run: yamllint -d relaxed .github/

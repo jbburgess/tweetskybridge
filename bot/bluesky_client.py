@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from atproto import Client, client_utils, models
+from atproto import Client, models
 
 from bot import config
 from bot.media import download_image, fetch_og_metadata

@@ -32,11 +32,11 @@ jobs:
       - name: Run Bluesky mirror bot
         run: python main.py
         env:
-          TWITTER_HANDLE:       ${{ secrets.TWITTER_HANDLE }}
+          TWITTER_HANDLE: ${{ secrets.TWITTER_HANDLE }}
           TWITTER_BEARER_TOKEN: ${{ secrets.TWITTER_BEARER_TOKEN }}
-          BLUESKY_HANDLE:       ${{ secrets.BLUESKY_HANDLE }}
-          BLUESKY_PASSWORD:     ${{ secrets.BLUESKY_PASSWORD }}
-          BLUESKY_SESSION:      ${{ secrets.BLUESKY_SESSION }}
+          BLUESKY_HANDLE: ${{ secrets.BLUESKY_HANDLE }}
+          BLUESKY_PASSWORD: ${{ secrets.BLUESKY_PASSWORD }}
+          BLUESKY_SESSION: ${{ secrets.BLUESKY_SESSION }}
 
       - name: Commit & push updated seen_ids.json
         run: |
@@ -54,8 +54,10 @@ jobs:
           git commit -m "chore: update seen ids"
 
           # Rewrite origin to include the GITHUB_TOKEN for auth
-          git remote set-url origin \
-            https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+          TOKEN="${{ secrets.GITHUB_TOKEN }}"
+          REPO="${{ github.repository }}"
+          REMOTE="https://x-access-token:${TOKEN}@github.com/${REPO}.git"
+          git remote set-url origin "$REMOTE"
 
           # Push back to the same branch
           git push origin HEAD:${{ github.ref_name }}

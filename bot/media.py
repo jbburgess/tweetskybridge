@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import io
 import logging
+import struct
 
 import requests
+from PIL import Image as PILImage
 
 from bot import config
 
@@ -54,6 +57,85 @@ def download_video(url: str) -> bytes:
 
     log.debug("Downloaded video %d bytes from %s", size, url)
     return b"".join(chunks)
+
+
+def get_video_dimensions(data: bytes) -> tuple[int, int]:
+    """Extract width and height from an MP4 video by walking the box tree.
+
+    Walks moov → trak → tkhd rather than scanning for the tkhd marker, so
+    that false matches in the mdat bitstream (common when mdat precedes moov)
+    are avoided. The tkhd width and height are stored as 16.16 fixed-point
+    values; only the integer part is returned. Returns ``(0, 0)`` if the
+    dimensions cannot be determined.
+    """
+    def _iter_boxes(buf: bytes, start: int, end: int):
+        pos = start
+        while pos + 8 <= end:
+            size = struct.unpack_from(">I", buf, pos)[0]
+            box_type = buf[pos + 4:pos + 8]
+            if size == 1:  # extended 64-bit size follows the type field
+                if pos + 16 > end:
+                    break
+                size = struct.unpack_from(">Q", buf, pos + 8)[0]
+                header = 16
+            elif size == 0:  # extends to end of container
+                size = end - pos
+                header = 8
+            else:
+                header = 8
+            if size < header or pos + size > end:
+                break
+            yield box_type, pos + header, pos + size
+            pos += size
+
+    def _parse_tkhd(buf: bytes, start: int, end: int) -> tuple[int, int]:
+        if start >= end:
+            return 0, 0
+        version = buf[start]
+        # Offset from payload start to 16.16 fixed-point width/height fields:
+        #   v0: version(1)+flags(3)+creation(4)+modification(4)+track_id(4)
+        #       +reserved(4)+duration(4)+reserved(8)+layer(2)+alt_group(2)
+        #       +volume(2)+reserved(2)+matrix(36) = 76 bytes
+        #   v1: same but creation/modification/duration are 8 bytes each = 88
+        if version == 0:
+            w_offset = start + 76
+        elif version == 1:
+            w_offset = start + 88
+        else:
+            return 0, 0
+        if w_offset + 8 > end:
+            return 0, 0
+        raw_w = struct.unpack_from(">I", buf, w_offset)[0]
+        raw_h = struct.unpack_from(">I", buf, w_offset + 4)[0]
+        return raw_w >> 16, raw_h >> 16  # upper 16 bits of 16.16 fixed-point
+
+    n = len(data)
+    for btype, bstart, bend in _iter_boxes(data, 0, n):
+        if btype != b"moov":
+            continue
+        for btype2, bstart2, bend2 in _iter_boxes(data, bstart, bend):
+            if btype2 != b"trak":
+                continue
+            for btype3, bstart3, bend3 in _iter_boxes(data, bstart2, bend2):
+                if btype3 != b"tkhd":
+                    continue
+                w, h = _parse_tkhd(data, bstart3, bend3)
+                if w > 0 and h > 0:
+                    return w, h
+    return 0, 0
+
+
+def get_image_dimensions(data: bytes) -> tuple[int, int]:
+    """Return ``(width, height)`` of the image in *data*.
+
+    Returns ``(0, 0)`` if the dimensions cannot be determined, so callers can
+    guard with ``if w and h:`` without unwrapping an optional.
+    """
+    try:
+        with PILImage.open(io.BytesIO(data)) as im:
+            return im.size  # (width, height)
+    except Exception:
+        return 0, 0
 
 
 def select_best_variant(variants: list[dict]) -> dict | None:

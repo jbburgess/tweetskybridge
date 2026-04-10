@@ -5,7 +5,7 @@ import logging
 from atproto import Client, models
 
 from bot import config
-from bot.media import download_image, download_video, fetch_og_metadata, select_best_variant
+from bot.media import download_image, download_video, fetch_og_metadata, get_image_dimensions, get_video_dimensions, select_best_variant
 from bot.text import build_text_builder, resolve_urls, truncate
 from bot.twitter_client import Tweet
 
@@ -52,10 +52,14 @@ class BlueskyClient:
         tb = build_text_builder(text, tweet)
 
         # Video/GIF takes priority — send_video handles upload + post in one call
-        video_data, video_alt = self._prepare_video(tweet)
+        video_data, video_alt, video_w, video_h = self._prepare_video(tweet)
         if video_data is not None:
             try:
-                self._client.send_video(text=tb, video=video_data, video_alt=video_alt)
+                video_ar = (
+                    models.AppBskyEmbedDefs.AspectRatio(width=video_w, height=video_h)
+                    if video_w and video_h else None
+                )
+                self._client.send_video(text=tb, video=video_data, video_alt=video_alt, video_aspect_ratio=video_ar)
                 log.info("Posted video to Bluesky: %s", text[:60])
                 return
             except Exception:
@@ -86,9 +90,15 @@ class BlueskyClient:
                 continue
 
             blob = self._client.upload_blob(data).blob
+            w = item.width
+            h = item.height
+            if not (w and h):
+                w, h = get_image_dimensions(data)
+            ar = models.AppBskyEmbedDefs.AspectRatio(width=w, height=h) if w and h else None
             images.append(models.AppBskyEmbedImages.Image(
                 alt=item.alt_text,
                 image=blob,
+                aspect_ratio=ar,
             ))
 
         if not images:
@@ -96,30 +106,35 @@ class BlueskyClient:
 
         return models.AppBskyEmbedImages.Main(images=images)  # type: ignore[call-arg]
 
-    def _prepare_video(self, tweet: Tweet) -> tuple[bytes | None, str]:
+    def _prepare_video(self, tweet: Tweet) -> tuple[bytes | None, str, int, int]:
         """Download the first video/GIF variant for a tweet.
 
-        Returns ``(video_bytes, alt_text)`` on success or ``(None, "")`` if
-        the tweet has no downloadable video.
+        Returns ``(video_bytes, alt_text, width, height)`` on success or
+        ``(None, "", 0, 0)`` if the tweet has no downloadable video.
+        Width and height come from the Twitter API media object and are used
+        to set the aspect ratio on the Bluesky post without extra API calls.
         """
         videos = [m for m in tweet.media
                   if m.type in ("video", "animated_gif") and m.variants]
         if not videos:
-            return None, ""
+            return None, "", 0, 0
 
         item = videos[0]  # Bluesky supports one video per post
         variant = select_best_variant(item.variants)
         if not variant:
             log.warning("No MP4 variant found for video media")
-            return None, ""
+            return None, "", 0, 0
 
         try:
             data = download_video(variant["url"])
         except Exception:
             log.warning("Failed to download video %s", variant.get("url", "?"))
-            return None, ""
+            return None, "", 0, 0
 
-        return data, item.alt_text
+        # Use Twitter API dimensions if present; fall back to parsing the MP4
+        # bytes directly (Twitter API returns null for width/height on video).
+        w, h = (item.width, item.height) if (item.width and item.height) else get_video_dimensions(data)
+        return data, item.alt_text, w, h
 
     def _build_link_card(self, tweet: Tweet) -> models.AppBskyEmbedExternal.Main | None:
         """Build an external link card embed for the first non-media URL.

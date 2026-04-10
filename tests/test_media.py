@@ -6,7 +6,7 @@ import pytest
 import requests
 
 from bot import config
-from bot.media import download_image, download_video, fetch_og_metadata, select_best_variant
+from bot.media import download_image, download_video, fetch_og_metadata, get_image_dimensions, get_video_dimensions, select_best_variant
 
 pytestmark = pytest.mark.unit
 
@@ -177,6 +177,111 @@ class TestSelectBestVariant:
         best = select_best_variant(variants)
         assert best is not None
         assert best["url"] == "https://v/gif.mp4"
+
+
+class TestGetImageDimensions:
+    def test_returns_correct_dimensions(self) -> None:
+        import io
+        from PIL import Image as PILImage
+
+        buf = io.BytesIO()
+        PILImage.new("RGB", (1280, 720)).save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+
+        w, h = get_image_dimensions(png_bytes)
+
+        assert w == 1280
+        assert h == 720
+
+    def test_returns_zero_zero_for_garbage_bytes(self) -> None:
+        w, h = get_image_dimensions(b"this is not an image")
+
+        assert w == 0
+        assert h == 0
+
+    def test_returns_zero_zero_for_empty_bytes(self) -> None:
+        w, h = get_image_dimensions(b"")
+
+        assert w == 0
+        assert h == 0
+
+
+class TestGetVideoDimensions:
+    def _make_box(self, box_type: bytes, payload: bytes) -> bytes:
+        import struct
+        size = 8 + len(payload)
+        return struct.pack(">I", size) + box_type + payload
+
+    def _make_tkhd_payload(self, width: int, height: int, version: int = 0) -> bytes:
+        import struct
+        version_flags = bytes([version]) + b"\x00\x00\x00"
+        # v0: 72 bytes of other fields (creation/mod/trackid/reserved/duration
+        #     + reserved/layer/altgroup/volume/reserved/matrix)
+        # v1: 84 bytes (creation/modification/duration are 8 bytes instead of 4)
+        other_fields = b"\x00" * (72 if version == 0 else 84)
+        return (
+            version_flags
+            + other_fields
+            + struct.pack(">I", width << 16)
+            + struct.pack(">I", height << 16)
+        )
+
+    def _make_mp4(self, *track_dims: tuple[int, int], version: int = 0) -> bytes:
+        """Build a minimal MP4 with moov → trak → tkhd for each (w, h) pair."""
+        traks = b"".join(
+            self._make_box(b"trak", self._make_box(b"tkhd", self._make_tkhd_payload(w, h, version)))
+            for w, h in track_dims
+        )
+        return self._make_box(b"moov", traks)
+
+    def test_v0_tkhd_returns_correct_dimensions(self) -> None:
+        data = self._make_mp4((1280, 720))
+
+        w, h = get_video_dimensions(data)
+
+        assert w == 1280
+        assert h == 720
+
+    def test_v1_tkhd_returns_correct_dimensions(self) -> None:
+        data = self._make_mp4((1920, 1080), version=1)
+
+        w, h = get_video_dimensions(data)
+
+        assert w == 1920
+        assert h == 1080
+
+    def test_skips_zero_dimension_tkhd_and_finds_next(self) -> None:
+        # Simulates audio track (w=0,h=0) followed by video track
+        data = self._make_mp4((0, 0), (1280, 720))
+
+        w, h = get_video_dimensions(data)
+
+        assert w == 1280
+        assert h == 720
+
+    def test_mdat_before_moov_is_ignored(self) -> None:
+        # Simulates a non-faststart MP4 where mdat (potentially containing
+        # the bytes b"tkhd" by chance) precedes the moov box.
+        mdat = self._make_box(b"mdat", b"tkhd" + b"\x00" * 200)
+        moov = self._make_mp4((1080, 1920))
+        data = mdat + moov
+
+        w, h = get_video_dimensions(data)
+
+        assert w == 1080
+        assert h == 1920
+
+    def test_returns_zero_zero_for_garbage_bytes(self) -> None:
+        w, h = get_video_dimensions(b"this is not a video")
+
+        assert w == 0
+        assert h == 0
+
+    def test_returns_zero_zero_for_empty_bytes(self) -> None:
+        w, h = get_video_dimensions(b"")
+
+        assert w == 0
+        assert h == 0
 
     def test_no_mp4_returns_none(self) -> None:
         variants = [

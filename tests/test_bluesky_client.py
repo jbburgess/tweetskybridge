@@ -129,6 +129,45 @@ class TestBuildImageEmbed:
         assert embed is None
 
 
+    @patch("bot.bluesky_client.get_image_dimensions", return_value=(1280, 720))
+    @patch("bot.bluesky_client.download_image", return_value=b"\xff\xd8fake-jpg")
+    def test_single_image_gets_aspect_ratio(self, mock_dl: MagicMock, mock_dims: MagicMock) -> None:
+        client = BlueskyClient()
+        blob_resp = SimpleNamespace(blob=_FAKE_BLOB)
+        client._client.upload_blob = MagicMock(return_value=blob_resp)
+
+        tweet = Tweet(
+            id="1",
+            text="photo",
+            media=[MediaItem(url="https://pbs.twimg.com/1.jpg", type="photo", alt_text="test")],
+        )
+
+        embed = client._build_image_embed(tweet)
+
+        assert embed is not None
+        assert embed.images[0].aspect_ratio is not None
+        assert embed.images[0].aspect_ratio.width == 1280
+        assert embed.images[0].aspect_ratio.height == 720
+
+    @patch("bot.bluesky_client.get_image_dimensions", return_value=(0, 0))
+    @patch("bot.bluesky_client.download_image", return_value=b"\xff\xd8fake-jpg")
+    def test_image_without_known_dimensions_has_no_aspect_ratio(self, mock_dl: MagicMock, mock_dims: MagicMock) -> None:
+        client = BlueskyClient()
+        blob_resp = SimpleNamespace(blob=_FAKE_BLOB)
+        client._client.upload_blob = MagicMock(return_value=blob_resp)
+
+        tweet = Tweet(
+            id="1",
+            text="photo",
+            media=[MediaItem(url="https://pbs.twimg.com/1.jpg", type="photo", alt_text="test")],
+        )
+
+        embed = client._build_image_embed(tweet)
+
+        assert embed is not None
+        assert embed.images[0].aspect_ratio is None
+
+
 class TestBuildLinkCard:
     def test_no_urls_returns_none(self) -> None:
         client = BlueskyClient()
@@ -233,9 +272,11 @@ class TestPrepareVideo:
     def test_no_video_returns_none(self) -> None:
         client = BlueskyClient()
         tweet = Tweet(id="1", text="no video")
-        data, alt = client._prepare_video(tweet)
+        data, alt, w, h = client._prepare_video(tweet)
         assert data is None
         assert alt == ""
+        assert w == 0
+        assert h == 0
 
     def test_photo_only_returns_none(self) -> None:
         client = BlueskyClient()
@@ -244,7 +285,7 @@ class TestPrepareVideo:
             text="photo only",
             media=[MediaItem(url="https://pbs.twimg.com/1.jpg", type="photo")],
         )
-        data, alt = client._prepare_video(tweet)
+        data, alt, w, h = client._prepare_video(tweet)
         assert data is None
 
     def test_video_without_variants_returns_none(self) -> None:
@@ -254,7 +295,7 @@ class TestPrepareVideo:
             text="video no variants",
             media=[MediaItem(url="https://pbs.twimg.com/thumb.jpg", type="video")],
         )
-        data, alt = client._prepare_video(tweet)
+        data, alt, w, h = client._prepare_video(tweet)
         assert data is None
 
     @patch("bot.bluesky_client.download_video", return_value=b"\x00\x00video-bytes")
@@ -277,10 +318,39 @@ class TestPrepareVideo:
                 ],
             )],
         )
-        data, alt = client._prepare_video(tweet)
+        data, alt, w, h = client._prepare_video(tweet)
         assert data == b"\x00\x00video-bytes"
         assert alt == "Goal highlight"
+        assert w == 0
+        assert h == 0
         mock_dl.assert_called_once_with("https://video.twimg.com/v/hi.mp4")
+
+    @patch("bot.bluesky_client.download_video", return_value=b"\x00\x00video-bytes")
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "bit_rate": 2176000,
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    def test_returns_video_dimensions_from_media_item(self, mock_variant: MagicMock, mock_dl: MagicMock) -> None:
+        client = BlueskyClient()
+        tweet = Tweet(
+            id="1",
+            text="video tweet",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="video",
+                alt_text="Goal highlight",
+                width=1920,
+                height=1080,
+                variants=[
+                    {"content_type": "video/mp4", "bit_rate": 2176000, "url": "https://video.twimg.com/v/hi.mp4"},
+                ],
+            )],
+        )
+        data, alt, w, h = client._prepare_video(tweet)
+        assert data == b"\x00\x00video-bytes"
+        assert w == 1920
+        assert h == 1080
 
     @patch("bot.bluesky_client.download_video", side_effect=Exception("timeout"))
     @patch("bot.bluesky_client.select_best_variant", return_value={
@@ -298,7 +368,7 @@ class TestPrepareVideo:
                 variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
             )],
         )
-        data, alt = client._prepare_video(tweet)
+        data, alt, w, h = client._prepare_video(tweet)
         assert data is None
 
     @patch("bot.bluesky_client.select_best_variant", return_value=None)
@@ -313,7 +383,7 @@ class TestPrepareVideo:
                 variants=[{"content_type": "application/x-mpegURL", "url": "https://video.twimg.com/v/playlist.m3u8"}],
             )],
         )
-        data, alt = client._prepare_video(tweet)
+        data, alt, w, h = client._prepare_video(tweet)
         assert data is None
 
     @patch("bot.bluesky_client.download_video", return_value=b"\x00gif-bytes")
@@ -333,7 +403,7 @@ class TestPrepareVideo:
                 variants=[{"content_type": "video/mp4", "bit_rate": 0, "url": "https://video.twimg.com/g/gif.mp4"}],
             )],
         )
-        data, alt = client._prepare_video(tweet)
+        data, alt, w, h = client._prepare_video(tweet)
         assert data == b"\x00gif-bytes"
 
 
@@ -366,7 +436,42 @@ class TestPostVideo:
         call_kwargs = client._client.send_video.call_args
         assert call_kwargs.kwargs["video"] == b"\x00video"
         assert call_kwargs.kwargs["video_alt"] == "Goal clip"
+        assert call_kwargs.kwargs.get("video_aspect_ratio") is None
         client._client.send_post.assert_not_called()
+
+    @patch("bot.bluesky_client.download_video", return_value=b"\x00video")
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    @patch.object(BlueskyClient, "login")
+    def test_video_with_dimensions_gets_aspect_ratio(
+        self, mock_login: MagicMock, mock_variant: MagicMock, mock_dl: MagicMock
+    ) -> None:
+        client = BlueskyClient()
+        client._client.send_video = MagicMock()
+        client._client.send_post = MagicMock()
+
+        tweet = Tweet(
+            id="1",
+            text="Goal!",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="video",
+                alt_text="Goal clip",
+                width=1920,
+                height=1080,
+                variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
+            )],
+        )
+
+        client.post(tweet)
+
+        call_kwargs = client._client.send_video.call_args
+        ar = call_kwargs.kwargs.get("video_aspect_ratio")
+        assert ar is not None
+        assert ar.width == 1920
+        assert ar.height == 1080
 
     @patch("bot.bluesky_client.download_video", side_effect=Exception("fail"))
     @patch("bot.bluesky_client.select_best_variant", return_value={

@@ -6,7 +6,7 @@ import pytest
 import requests
 
 from bot import config
-from bot.media import download_image, download_video, fetch_og_metadata, select_best_variant
+from bot.media import download_image, download_video, fetch_og_metadata, get_image_dimensions, select_best_variant
 
 pytestmark = pytest.mark.unit
 
@@ -177,6 +177,33 @@ class TestSelectBestVariant:
         best = select_best_variant(variants)
         assert best is not None
         assert best["url"] == "https://v/gif.mp4"
+
+
+class TestGetImageDimensions:
+    def test_returns_correct_dimensions(self) -> None:
+        import io
+        from PIL import Image as PILImage
+
+        buf = io.BytesIO()
+        PILImage.new("RGB", (1280, 720)).save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+
+        w, h = get_image_dimensions(png_bytes)
+
+        assert w == 1280
+        assert h == 720
+
+    def test_returns_zero_zero_for_garbage_bytes(self) -> None:
+        w, h = get_image_dimensions(b"this is not an image")
+
+        assert w == 0
+        assert h == 0
+
+    def test_returns_zero_zero_for_empty_bytes(self) -> None:
+        w, h = get_image_dimensions(b"")
+
+        assert w == 0
+        assert h == 0
 
     def test_no_mp4_returns_none(self) -> None:
         variants = [

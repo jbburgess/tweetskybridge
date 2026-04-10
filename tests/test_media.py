@@ -207,21 +207,35 @@ class TestGetImageDimensions:
 
 
 class TestGetVideoDimensions:
-    def _make_tkhd(self, width: int, height: int, version: int = 0) -> bytes:
-        """Build a minimal tkhd box with the given display dimensions."""
+    def _make_box(self, box_type: bytes, payload: bytes) -> bytes:
         import struct
+        size = 8 + len(payload)
+        return struct.pack(">I", size) + box_type + payload
 
+    def _make_tkhd_payload(self, width: int, height: int, version: int = 0) -> bytes:
+        import struct
         version_flags = bytes([version]) + b"\x00\x00\x00"
-        # v0 has 72 bytes of other fields before width; v1 has 84
+        # v0: 72 bytes of other fields (creation/mod/trackid/reserved/duration
+        #     + reserved/layer/altgroup/volume/reserved/matrix)
+        # v1: 84 bytes (creation/modification/duration are 8 bytes instead of 4)
         other_fields = b"\x00" * (72 if version == 0 else 84)
-        w_bytes = struct.pack(">I", width << 16)
-        h_bytes = struct.pack(">I", height << 16)
-        payload = version_flags + other_fields + w_bytes + h_bytes
-        box_size = struct.pack(">I", 4 + 4 + len(payload))
-        return box_size + b"tkhd" + payload
+        return (
+            version_flags
+            + other_fields
+            + struct.pack(">I", width << 16)
+            + struct.pack(">I", height << 16)
+        )
+
+    def _make_mp4(self, *track_dims: tuple[int, int], version: int = 0) -> bytes:
+        """Build a minimal MP4 with moov → trak → tkhd for each (w, h) pair."""
+        traks = b"".join(
+            self._make_box(b"trak", self._make_box(b"tkhd", self._make_tkhd_payload(w, h, version)))
+            for w, h in track_dims
+        )
+        return self._make_box(b"moov", traks)
 
     def test_v0_tkhd_returns_correct_dimensions(self) -> None:
-        data = self._make_tkhd(1280, 720, version=0)
+        data = self._make_mp4((1280, 720))
 
         w, h = get_video_dimensions(data)
 
@@ -229,7 +243,7 @@ class TestGetVideoDimensions:
         assert h == 720
 
     def test_v1_tkhd_returns_correct_dimensions(self) -> None:
-        data = self._make_tkhd(1920, 1080, version=1)
+        data = self._make_mp4((1920, 1080), version=1)
 
         w, h = get_video_dimensions(data)
 
@@ -238,14 +252,24 @@ class TestGetVideoDimensions:
 
     def test_skips_zero_dimension_tkhd_and_finds_next(self) -> None:
         # Simulates audio track (w=0,h=0) followed by video track
-        audio_tkhd = self._make_tkhd(0, 0)
-        video_tkhd = self._make_tkhd(1280, 720)
-        data = audio_tkhd + video_tkhd
+        data = self._make_mp4((0, 0), (1280, 720))
 
         w, h = get_video_dimensions(data)
 
         assert w == 1280
         assert h == 720
+
+    def test_mdat_before_moov_is_ignored(self) -> None:
+        # Simulates a non-faststart MP4 where mdat (potentially containing
+        # the bytes b"tkhd" by chance) precedes the moov box.
+        mdat = self._make_box(b"mdat", b"tkhd" + b"\x00" * 200)
+        moov = self._make_mp4((1080, 1920))
+        data = mdat + moov
+
+        w, h = get_video_dimensions(data)
+
+        assert w == 1080
+        assert h == 1920
 
     def test_returns_zero_zero_for_garbage_bytes(self) -> None:
         w, h = get_video_dimensions(b"this is not a video")

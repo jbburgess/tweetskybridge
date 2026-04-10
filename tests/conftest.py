@@ -82,3 +82,53 @@ def tweet_with_multiple_urls() -> Tweet:
 def long_tweet() -> Tweet:
     """A tweet whose text exceeds 300 graphemes."""
     return Tweet(id="105", text="A" * 350)
+
+
+@pytest.fixture()
+def tweet_with_video() -> Tweet:
+    """A tweet with a video attachment and variants."""
+    return Tweet(
+        id="106",
+        text="Check this out! https://t.co/vid1",
+        media=[
+            MediaItem(
+                url="https://pbs.twimg.com/ext_tw_video_thumb/preview.jpg",
+                type="video",
+                alt_text="Goal highlight",
+                variants=[
+                    {"content_type": "application/x-mpegURL", "url": "https://video.twimg.com/v/playlist.m3u8"},
+                    {"content_type": "video/mp4", "bit_rate": 832000, "url": "https://video.twimg.com/v/vid_832.mp4"},
+                    {"content_type": "video/mp4", "bit_rate": 2176000, "url": "https://video.twimg.com/v/vid_2176.mp4"},
+                ],
+            ),
+        ],
+        urls=[{
+            "url": "https://t.co/vid1",
+            "expanded_url": "https://twitter.com/user/status/106/video/1",
+            "display_url": "pic.twitter.com/vid1",
+        }],
+    )
+
+
+@pytest.fixture()
+def tweet_with_gif() -> Tweet:
+    """A tweet with an animated GIF attachment."""
+    return Tweet(
+        id="107",
+        text="Reaction https://t.co/gif1",
+        media=[
+            MediaItem(
+                url="https://pbs.twimg.com/tweet_video_thumb/preview.jpg",
+                type="animated_gif",
+                alt_text="",
+                variants=[
+                    {"content_type": "video/mp4", "bit_rate": 0, "url": "https://video.twimg.com/g/gif.mp4"},
+                ],
+            ),
+        ],
+        urls=[{
+            "url": "https://t.co/gif1",
+            "expanded_url": "https://x.com/user/status/107/video/1",
+            "display_url": "pic.twitter.com/gif1",
+        }],
+    )

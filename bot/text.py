@@ -48,11 +48,11 @@ def resolve_urls(tweet: Tweet) -> str:
             continue
 
         # If this URL entity points to the tweet's own media, remove it rather
-        # than expanding, since the media will be attached as an image embed.
-        if expanded.startswith("https://twitter.com/") and "/photo/" in expanded:
+        # than expanding, since the media will be attached as an embed.
+        if expanded.startswith("https://twitter.com/") and ("/photo/" in expanded or "/video/" in expanded):
             text = text.replace(short, "").strip()
             continue
-        if expanded.startswith("https://x.com/") and "/photo/" in expanded:
+        if expanded.startswith("https://x.com/") and ("/photo/" in expanded or "/video/" in expanded):
             text = text.replace(short, "").strip()
             continue
 

@@ -52,6 +52,42 @@ class TestResolveUrls:
         result = resolve_urls(tweet)
         assert result == "text https://t.co/x"
 
+    def test_strips_video_url_twitter(self) -> None:
+        tweet = Tweet(
+            id="202",
+            text="Watch this https://t.co/vid1",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="video",
+                variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v.mp4"}],
+            )],
+            urls=[{
+                "url": "https://t.co/vid1",
+                "expanded_url": "https://twitter.com/user/status/202/video/1",
+                "display_url": "pic.twitter.com/vid1",
+            }],
+        )
+        result = resolve_urls(tweet)
+        assert result == "Watch this"
+
+    def test_strips_video_url_xcom(self) -> None:
+        tweet = Tweet(
+            id="203",
+            text="GIF time https://t.co/gif1",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="animated_gif",
+                variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/g.mp4"}],
+            )],
+            urls=[{
+                "url": "https://t.co/gif1",
+                "expanded_url": "https://x.com/user/status/203/video/1",
+                "display_url": "pic.x.com/gif1",
+            }],
+        )
+        result = resolve_urls(tweet)
+        assert result == "GIF time"
+
 
 class TestGraphemeLen:
     def test_ascii(self) -> None:

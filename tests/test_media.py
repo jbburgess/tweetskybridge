@@ -6,7 +6,7 @@ import pytest
 import requests
 
 from bot import config
-from bot.media import download_image, fetch_og_metadata
+from bot.media import download_image, download_video, fetch_og_metadata, select_best_variant
 
 pytestmark = pytest.mark.unit
 
@@ -15,6 +15,8 @@ pytestmark = pytest.mark.unit
 def _set_config() -> None:
     config.HTTP_TIMEOUT = 5
     config.MAX_IMAGE_BYTES = 1024
+    config.VIDEO_TIMEOUT = 10
+    config.MAX_VIDEO_BYTES = 2048
 
 
 class TestDownloadImage:
@@ -119,3 +121,77 @@ class TestFetchOgMetadata:
         assert meta["title"] == ""
         assert meta["description"] == ""
         assert meta["image"] == ""
+
+
+class TestDownloadVideo:
+    @patch("bot.media.requests.get")
+    def test_downloads_bytes(self, mock_get: MagicMock) -> None:
+        mock_resp = MagicMock()
+        mock_resp.iter_content.return_value = [b"video-data"]
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        result = download_video("https://video.twimg.com/v/vid.mp4")
+
+        assert result == b"video-data"
+        mock_get.assert_called_once_with(
+            "https://video.twimg.com/v/vid.mp4", timeout=10, stream=True
+        )
+
+    @patch("bot.media.requests.get")
+    def test_raises_on_oversized_video(self, mock_get: MagicMock) -> None:
+        mock_resp = MagicMock()
+        # Return chunks that exceed MAX_VIDEO_BYTES (2048 in test fixture)
+        mock_resp.iter_content.return_value = [b"x" * 1500, b"x" * 1500]
+        mock_resp.raise_for_status = MagicMock()
+        mock_get.return_value = mock_resp
+
+        with pytest.raises(ValueError, match="exceeds"):
+            download_video("https://video.twimg.com/v/huge.mp4")
+
+    @patch("bot.media.requests.get")
+    def test_raises_on_http_error(self, mock_get: MagicMock) -> None:
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status.side_effect = requests.HTTPError("404")
+        mock_get.return_value = mock_resp
+
+        with pytest.raises(requests.HTTPError):
+            download_video("https://video.twimg.com/v/missing.mp4")
+
+
+class TestSelectBestVariant:
+    def test_picks_highest_bitrate_mp4(self) -> None:
+        variants = [
+            {"content_type": "application/x-mpegURL", "url": "https://v/playlist.m3u8"},
+            {"content_type": "video/mp4", "bit_rate": 832000, "url": "https://v/lo.mp4"},
+            {"content_type": "video/mp4", "bit_rate": 2176000, "url": "https://v/hi.mp4"},
+        ]
+        best = select_best_variant(variants)
+        assert best is not None
+        assert best["url"] == "https://v/hi.mp4"
+
+    def test_gif_single_variant(self) -> None:
+        variants = [
+            {"content_type": "video/mp4", "bit_rate": 0, "url": "https://v/gif.mp4"},
+        ]
+        best = select_best_variant(variants)
+        assert best is not None
+        assert best["url"] == "https://v/gif.mp4"
+
+    def test_no_mp4_returns_none(self) -> None:
+        variants = [
+            {"content_type": "application/x-mpegURL", "url": "https://v/playlist.m3u8"},
+        ]
+        assert select_best_variant(variants) is None
+
+    def test_empty_variants_returns_none(self) -> None:
+        assert select_best_variant([]) is None
+
+    def test_missing_bit_rate_treated_as_zero(self) -> None:
+        variants = [
+            {"content_type": "video/mp4", "url": "https://v/a.mp4"},
+            {"content_type": "video/mp4", "bit_rate": 500000, "url": "https://v/b.mp4"},
+        ]
+        best = select_best_variant(variants)
+        assert best is not None
+        assert best["url"] == "https://v/b.mp4"

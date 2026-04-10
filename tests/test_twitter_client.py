@@ -42,6 +42,7 @@ def _make_tweepy_media(
     preview_image_url: str | None = None,
     media_type: str = "photo",
     alt_text: str = "",
+    variants: list | None = None,
 ) -> SimpleNamespace:
     m = SimpleNamespace(
         media_key=media_key,
@@ -49,6 +50,7 @@ def _make_tweepy_media(
         preview_image_url=preview_image_url,
         type=media_type,
         alt_text=alt_text,
+        variants=variants,
     )
     return m
 
@@ -231,3 +233,107 @@ class TestFetchRecentTweets:
         tweets = client.fetch_recent_tweets()
 
         assert [t.id for t in tweets] == ["100", "200", "300"]
+
+    @patch("bot.twitter_client.save_twitter_user_id")
+    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
+    def test_returns_video_with_variants(
+        self, mock_load: MagicMock, mock_save: MagicMock
+    ) -> None:
+        client = TwitterClient.__new__(TwitterClient)
+        client._client = MagicMock()
+
+        video_variants = [
+            {"content_type": "application/x-mpegURL", "url": "https://video.twimg.com/v/playlist.m3u8"},
+            {"content_type": "video/mp4", "bit_rate": 832000, "url": "https://video.twimg.com/v/lo.mp4"},
+            {"content_type": "video/mp4", "bit_rate": 2176000, "url": "https://video.twimg.com/v/hi.mp4"},
+        ]
+        media_obj = _make_tweepy_media(
+            media_key="mk_v",
+            url=None,
+            preview_image_url="https://pbs.twimg.com/ext_tw_video_thumb/preview.jpg",
+            media_type="video",
+            alt_text="Goal clip",
+            variants=video_variants,
+        )
+        tweet_obj = _make_tweepy_tweet(
+            tweet_id=500,
+            text="What a goal!",
+            attachments={"media_keys": ["mk_v"]},
+        )
+
+        client._client.get_users_tweets.return_value = SimpleNamespace(
+            data=[tweet_obj],
+            includes={"media": [media_obj]},
+        )
+
+        tweets = client.fetch_recent_tweets()
+
+        assert len(tweets) == 1
+        assert len(tweets[0].media) == 1
+        m = tweets[0].media[0]
+        assert m.type == "video"
+        assert m.url == "https://pbs.twimg.com/ext_tw_video_thumb/preview.jpg"
+        assert m.alt_text == "Goal clip"
+        assert len(m.variants) == 3
+        assert m.variants[2]["bit_rate"] == 2176000
+
+    @patch("bot.twitter_client.save_twitter_user_id")
+    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
+    def test_returns_gif_with_single_variant(
+        self, mock_load: MagicMock, mock_save: MagicMock
+    ) -> None:
+        client = TwitterClient.__new__(TwitterClient)
+        client._client = MagicMock()
+
+        gif_variants = [
+            {"content_type": "video/mp4", "bit_rate": 0, "url": "https://video.twimg.com/g/gif.mp4"},
+        ]
+        media_obj = _make_tweepy_media(
+            media_key="mk_g",
+            url=None,
+            preview_image_url="https://pbs.twimg.com/tweet_video_thumb/thumb.jpg",
+            media_type="animated_gif",
+            variants=gif_variants,
+        )
+        tweet_obj = _make_tweepy_tweet(
+            tweet_id=600,
+            text="Reaction",
+            attachments={"media_keys": ["mk_g"]},
+        )
+
+        client._client.get_users_tweets.return_value = SimpleNamespace(
+            data=[tweet_obj],
+            includes={"media": [media_obj]},
+        )
+
+        tweets = client.fetch_recent_tweets()
+
+        assert len(tweets) == 1
+        m = tweets[0].media[0]
+        assert m.type == "animated_gif"
+        assert len(m.variants) == 1
+        assert m.variants[0]["content_type"] == "video/mp4"
+
+    @patch("bot.twitter_client.save_twitter_user_id")
+    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
+    def test_photo_has_no_variants(
+        self, mock_load: MagicMock, mock_save: MagicMock
+    ) -> None:
+        client = TwitterClient.__new__(TwitterClient)
+        client._client = MagicMock()
+
+        media_obj = _make_tweepy_media(media_key="mk_p", media_type="photo")
+        tweet_obj = _make_tweepy_tweet(
+            tweet_id=700,
+            text="Photo",
+            attachments={"media_keys": ["mk_p"]},
+        )
+
+        client._client.get_users_tweets.return_value = SimpleNamespace(
+            data=[tweet_obj],
+            includes={"media": [media_obj]},
+        )
+
+        tweets = client.fetch_recent_tweets()
+
+        assert tweets[0].media[0].variants == []

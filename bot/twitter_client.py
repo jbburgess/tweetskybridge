@@ -17,6 +17,7 @@ class MediaItem:
     url: str
     type: str  # "photo", "video", "animated_gif"
     alt_text: str = ""
+    variants: list[dict] = field(default_factory=list)  # video/GIF stream variants
 
 
 @dataclass
@@ -60,7 +61,7 @@ class TwitterClient:
                 exclude=["retweets", "replies"],
                 tweet_fields=["created_at", "entities"],
                 expansions=["attachments.media_keys"],
-                media_fields=["url", "preview_image_url", "type", "alt_text"],
+                media_fields=["url", "preview_image_url", "type", "alt_text", "variants"],
             )
         except tweepy.TooManyRequests:
             log.warning("Hit Twitter rate limit, skipping this run")
@@ -86,10 +87,26 @@ class TwitterClient:
                     if m is None:
                         continue
                     media_url = m.url or m.preview_image_url or ""
+                    media_type = m.type or "photo"
+
+                    # Parse video/GIF variants
+                    variants: list[dict] = []
+                    if media_type in ("video", "animated_gif"):
+                        for v in getattr(m, "variants", None) or []:
+                            if isinstance(v, dict):
+                                variants.append(v)
+                            else:
+                                variants.append({
+                                    "content_type": getattr(v, "content_type", ""),
+                                    "url": getattr(v, "url", ""),
+                                    "bit_rate": getattr(v, "bit_rate", 0),
+                                })
+
                     media_items.append(MediaItem(
                         url=media_url,
-                        type=m.type or "photo",
+                        type=media_type,
                         alt_text=getattr(m, "alt_text", "") or "",
+                        variants=variants,
                     ))
 
             # Collect URL entities

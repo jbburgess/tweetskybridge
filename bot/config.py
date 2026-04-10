@@ -28,8 +28,14 @@ MAX_SEEN_IDS: int = 100
 # Maximum image download size in bytes (5 MB)
 MAX_IMAGE_BYTES: int = 5 * 1024 * 1024
 
+# Maximum video download size in bytes (50 MB — Bluesky limit)
+MAX_VIDEO_BYTES: int = 50 * 1024 * 1024
+
 # HTTP timeout for media / OG-metadata fetches (seconds)
 HTTP_TIMEOUT: int = 15
+
+# HTTP timeout for video downloads (seconds — videos are much larger)
+VIDEO_TIMEOUT: int = 60
 
 # Bluesky grapheme limit
 BLUESKY_GRAPHEME_LIMIT: int = 300

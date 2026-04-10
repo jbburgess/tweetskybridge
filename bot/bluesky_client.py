@@ -90,7 +90,10 @@ class BlueskyClient:
                 continue
 
             blob = self._client.upload_blob(data).blob
-            w, h = get_image_dimensions(data)
+            w = item.width
+            h = item.height
+            if not (w and h):
+                w, h = get_image_dimensions(data)
             ar = models.AppBskyEmbedDefs.AspectRatio(width=w, height=h) if w and h else None
             images.append(models.AppBskyEmbedImages.Image(
                 alt=item.alt_text,

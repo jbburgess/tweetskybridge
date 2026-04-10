@@ -18,6 +18,8 @@ class MediaItem:
     type: str  # "photo", "video", "animated_gif"
     alt_text: str = ""
     variants: list[dict] = field(default_factory=list)  # video/GIF stream variants
+    width: int = 0
+    height: int = 0
 
 
 @dataclass
@@ -61,7 +63,7 @@ class TwitterClient:
                 exclude=["retweets", "replies"],
                 tweet_fields=["created_at", "entities"],
                 expansions=["attachments.media_keys"],
-                media_fields=["url", "preview_image_url", "type", "alt_text", "variants"],
+                media_fields=["url", "preview_image_url", "type", "alt_text", "variants", "width", "height"],
             )
         except tweepy.TooManyRequests:
             log.warning("Hit Twitter rate limit, skipping this run")
@@ -107,6 +109,8 @@ class TwitterClient:
                         type=media_type,
                         alt_text=getattr(m, "alt_text", "") or "",
                         variants=variants,
+                        width=getattr(m, "width", 0) or 0,
+                        height=getattr(m, "height", 0) or 0,
                     ))
 
             # Collect URL entities

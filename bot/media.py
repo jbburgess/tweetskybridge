@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import io
 import logging
 
 import requests
+from PIL import Image as PILImage
 
 from bot import config
 
@@ -54,6 +56,19 @@ def download_video(url: str) -> bytes:
 
     log.debug("Downloaded video %d bytes from %s", size, url)
     return b"".join(chunks)
+
+
+def get_image_dimensions(data: bytes) -> tuple[int, int]:
+    """Return ``(width, height)`` of the image in *data*.
+
+    Returns ``(0, 0)`` if the dimensions cannot be determined, so callers can
+    guard with ``if w and h:`` without unwrapping an optional.
+    """
+    try:
+        with PILImage.open(io.BytesIO(data)) as im:
+            return im.size  # (width, height)
+    except Exception:
+        return 0, 0
 
 
 def select_best_variant(variants: list[dict]) -> dict | None:

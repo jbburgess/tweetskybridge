@@ -6,7 +6,7 @@ import pytest
 import requests
 
 from bot import config
-from bot.media import download_image, download_video, fetch_og_metadata, get_image_dimensions, select_best_variant
+from bot.media import download_image, download_video, fetch_og_metadata, get_image_dimensions, get_video_dimensions, select_best_variant
 
 pytestmark = pytest.mark.unit
 
@@ -201,6 +201,60 @@ class TestGetImageDimensions:
 
     def test_returns_zero_zero_for_empty_bytes(self) -> None:
         w, h = get_image_dimensions(b"")
+
+        assert w == 0
+        assert h == 0
+
+
+class TestGetVideoDimensions:
+    def _make_tkhd(self, width: int, height: int, version: int = 0) -> bytes:
+        """Build a minimal tkhd box with the given display dimensions."""
+        import struct
+
+        version_flags = bytes([version]) + b"\x00\x00\x00"
+        # v0 has 72 bytes of other fields before width; v1 has 84
+        other_fields = b"\x00" * (72 if version == 0 else 84)
+        w_bytes = struct.pack(">I", width << 16)
+        h_bytes = struct.pack(">I", height << 16)
+        payload = version_flags + other_fields + w_bytes + h_bytes
+        box_size = struct.pack(">I", 4 + 4 + len(payload))
+        return box_size + b"tkhd" + payload
+
+    def test_v0_tkhd_returns_correct_dimensions(self) -> None:
+        data = self._make_tkhd(1280, 720, version=0)
+
+        w, h = get_video_dimensions(data)
+
+        assert w == 1280
+        assert h == 720
+
+    def test_v1_tkhd_returns_correct_dimensions(self) -> None:
+        data = self._make_tkhd(1920, 1080, version=1)
+
+        w, h = get_video_dimensions(data)
+
+        assert w == 1920
+        assert h == 1080
+
+    def test_skips_zero_dimension_tkhd_and_finds_next(self) -> None:
+        # Simulates audio track (w=0,h=0) followed by video track
+        audio_tkhd = self._make_tkhd(0, 0)
+        video_tkhd = self._make_tkhd(1280, 720)
+        data = audio_tkhd + video_tkhd
+
+        w, h = get_video_dimensions(data)
+
+        assert w == 1280
+        assert h == 720
+
+    def test_returns_zero_zero_for_garbage_bytes(self) -> None:
+        w, h = get_video_dimensions(b"this is not a video")
+
+        assert w == 0
+        assert h == 0
+
+    def test_returns_zero_zero_for_empty_bytes(self) -> None:
+        w, h = get_video_dimensions(b"")
 
         assert w == 0
         assert h == 0

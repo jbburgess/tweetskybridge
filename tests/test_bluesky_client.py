@@ -318,12 +318,39 @@ class TestPrepareVideo:
                 ],
             )],
         )
-        data, alt, w, h = client._prepare_video(tweet)
+        with patch("bot.bluesky_client.get_video_dimensions", return_value=(0, 0)):
+            data, alt, w, h = client._prepare_video(tweet)
         assert data == b"\x00\x00video-bytes"
         assert alt == "Goal highlight"
         assert w == 0
         assert h == 0
         mock_dl.assert_called_once_with("https://video.twimg.com/v/hi.mp4")
+
+    @patch("bot.bluesky_client.download_video", return_value=b"\x00\x00video-bytes")
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "bit_rate": 2176000,
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    def test_falls_back_to_byte_parsing_when_api_has_no_dimensions(
+        self, mock_variant: MagicMock, mock_dl: MagicMock
+    ) -> None:
+        client = BlueskyClient()
+        tweet = Tweet(
+            id="1",
+            text="video tweet",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="video",
+                # No width/height from Twitter API (the common case for video)
+                variants=[{"content_type": "video/mp4", "bit_rate": 2176000, "url": "https://video.twimg.com/v/hi.mp4"}],
+            )],
+        )
+        with patch("bot.bluesky_client.get_video_dimensions", return_value=(1080, 1920)) as mock_gvd:
+            data, alt, w, h = client._prepare_video(tweet)
+            mock_gvd.assert_called_once_with(b"\x00\x00video-bytes")
+        assert w == 1080
+        assert h == 1920
 
     @patch("bot.bluesky_client.download_video", return_value=b"\x00\x00video-bytes")
     @patch("bot.bluesky_client.select_best_variant", return_value={

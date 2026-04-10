@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import logging
+import struct
 
 import requests
 from PIL import Image as PILImage
@@ -56,6 +57,41 @@ def download_video(url: str) -> bytes:
 
     log.debug("Downloaded video %d bytes from %s", size, url)
     return b"".join(chunks)
+
+
+def get_video_dimensions(data: bytes) -> tuple[int, int]:
+    """Extract width and height from an MP4 video's tkhd (track header) box.
+
+    Scans for the first tkhd box with non-zero dimensions, which corresponds
+    to the video track. The width and height are stored as 16.16 fixed-point
+    values; only the integer part is returned. Returns ``(0, 0)`` if the
+    dimensions cannot be determined.
+    """
+    marker = b"tkhd"
+    pos = data.find(marker)
+    while pos != -1:
+        # The tkhd payload begins immediately after the 4-byte type field.
+        payload_start = pos + 4
+        if payload_start >= len(data):
+            break
+        version = data[payload_start]
+        # Byte offset from payload_start to the 16.16 fixed-point width field:
+        #   v0: version(1)+flags(3)+creation(4)+modification(4)+track_id(4)
+        #       +reserved(4)+duration(4)+reserved(8)+layer(2)+alt_group(2)
+        #       +volume(2)+reserved(2)+matrix(36) = 76
+        #   v1: version(1)+flags(3)+creation(8)+modification(8)+track_id(4)
+        #       +reserved(4)+duration(8)+reserved(8)+layer(2)+alt_group(2)
+        #       +volume(2)+reserved(2)+matrix(36) = 88
+        w_offset = payload_start + (76 if version == 0 else 88)
+        if w_offset + 8 <= len(data):
+            raw_w = struct.unpack_from(">I", data, w_offset)[0]
+            raw_h = struct.unpack_from(">I", data, w_offset + 4)[0]
+            w = raw_w >> 16  # upper 16 bits of 16.16 fixed-point
+            h = raw_h >> 16
+            if w > 0 and h > 0:
+                return w, h
+        pos = data.find(marker, pos + 1)
+    return 0, 0
 
 
 def get_image_dimensions(data: bytes) -> tuple[int, int]:

@@ -227,3 +227,286 @@ class TestPost:
 
         mock_login.assert_called_once()
         client._client.send_post.assert_called_once()
+
+
+class TestPrepareVideo:
+    def test_no_video_returns_none(self) -> None:
+        client = BlueskyClient()
+        tweet = Tweet(id="1", text="no video")
+        data, alt = client._prepare_video(tweet)
+        assert data is None
+        assert alt == ""
+
+    def test_photo_only_returns_none(self) -> None:
+        client = BlueskyClient()
+        tweet = Tweet(
+            id="1",
+            text="photo only",
+            media=[MediaItem(url="https://pbs.twimg.com/1.jpg", type="photo")],
+        )
+        data, alt = client._prepare_video(tweet)
+        assert data is None
+
+    def test_video_without_variants_returns_none(self) -> None:
+        client = BlueskyClient()
+        tweet = Tweet(
+            id="1",
+            text="video no variants",
+            media=[MediaItem(url="https://pbs.twimg.com/thumb.jpg", type="video")],
+        )
+        data, alt = client._prepare_video(tweet)
+        assert data is None
+
+    @patch("bot.bluesky_client.download_video", return_value=b"\x00\x00video-bytes")
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "bit_rate": 2176000,
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    def test_returns_video_data_and_alt(self, mock_variant: MagicMock, mock_dl: MagicMock) -> None:
+        client = BlueskyClient()
+        tweet = Tweet(
+            id="1",
+            text="video tweet",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="video",
+                alt_text="Goal highlight",
+                variants=[
+                    {"content_type": "video/mp4", "bit_rate": 2176000, "url": "https://video.twimg.com/v/hi.mp4"},
+                ],
+            )],
+        )
+        data, alt = client._prepare_video(tweet)
+        assert data == b"\x00\x00video-bytes"
+        assert alt == "Goal highlight"
+        mock_dl.assert_called_once_with("https://video.twimg.com/v/hi.mp4")
+
+    @patch("bot.bluesky_client.download_video", side_effect=Exception("timeout"))
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    def test_returns_none_on_download_failure(self, mock_variant: MagicMock, mock_dl: MagicMock) -> None:
+        client = BlueskyClient()
+        tweet = Tweet(
+            id="1",
+            text="video fail",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="video",
+                variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
+            )],
+        )
+        data, alt = client._prepare_video(tweet)
+        assert data is None
+
+    @patch("bot.bluesky_client.select_best_variant", return_value=None)
+    def test_returns_none_when_no_mp4_variant(self, mock_variant: MagicMock) -> None:
+        client = BlueskyClient()
+        tweet = Tweet(
+            id="1",
+            text="video no mp4",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="video",
+                variants=[{"content_type": "application/x-mpegURL", "url": "https://video.twimg.com/v/playlist.m3u8"}],
+            )],
+        )
+        data, alt = client._prepare_video(tweet)
+        assert data is None
+
+    @patch("bot.bluesky_client.download_video", return_value=b"\x00gif-bytes")
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "bit_rate": 0,
+        "url": "https://video.twimg.com/g/gif.mp4",
+    })
+    def test_animated_gif(self, mock_variant: MagicMock, mock_dl: MagicMock) -> None:
+        client = BlueskyClient()
+        tweet = Tweet(
+            id="1",
+            text="gif tweet",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="animated_gif",
+                variants=[{"content_type": "video/mp4", "bit_rate": 0, "url": "https://video.twimg.com/g/gif.mp4"}],
+            )],
+        )
+        data, alt = client._prepare_video(tweet)
+        assert data == b"\x00gif-bytes"
+
+
+class TestPostVideo:
+    @patch("bot.bluesky_client.download_video", return_value=b"\x00video")
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    @patch.object(BlueskyClient, "login")
+    def test_video_uses_send_video(self, mock_login: MagicMock, mock_variant: MagicMock, mock_dl: MagicMock) -> None:
+        client = BlueskyClient()
+        client._client.send_video = MagicMock()
+        client._client.send_post = MagicMock()
+
+        tweet = Tweet(
+            id="1",
+            text="Goal!",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="video",
+                alt_text="Goal clip",
+                variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
+            )],
+        )
+
+        client.post(tweet)
+
+        client._client.send_video.assert_called_once()
+        call_kwargs = client._client.send_video.call_args
+        assert call_kwargs.kwargs["video"] == b"\x00video"
+        assert call_kwargs.kwargs["video_alt"] == "Goal clip"
+        client._client.send_post.assert_not_called()
+
+    @patch("bot.bluesky_client.download_video", side_effect=Exception("fail"))
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    @patch.object(BlueskyClient, "login")
+    def test_download_failure_falls_back_to_text_post(
+        self, mock_login: MagicMock, mock_variant: MagicMock, mock_dl: MagicMock
+    ) -> None:
+        client = BlueskyClient()
+        client._client.send_video = MagicMock()
+        client._client.send_post = MagicMock()
+
+        tweet = Tweet(
+            id="1",
+            text="Video post",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="video",
+                variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
+            )],
+        )
+
+        client.post(tweet)
+
+        client._client.send_video.assert_not_called()
+        client._client.send_post.assert_called_once()
+
+    @patch("bot.bluesky_client.download_video", return_value=b"\x00video")
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    @patch.object(BlueskyClient, "login")
+    def test_send_video_rejection_falls_back_to_text_post(
+        self, mock_login: MagicMock, mock_variant: MagicMock, mock_dl: MagicMock
+    ) -> None:
+        """When Bluesky rejects the video (e.g. too long), fall back to send_post."""
+        client = BlueskyClient()
+        client._client.send_video = MagicMock(side_effect=Exception("video too long"))
+        client._client.send_post = MagicMock()
+
+        tweet = Tweet(
+            id="1",
+            text="Long video",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="video",
+                variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
+            )],
+        )
+
+        client.post(tweet)
+
+        client._client.send_video.assert_called_once()
+        client._client.send_post.assert_called_once()
+
+    @patch("bot.bluesky_client.fetch_og_metadata", return_value={
+        "title": "Video on X",
+        "description": "Watch the clip",
+        "image": "",
+    })
+    @patch("bot.bluesky_client.download_video", return_value=b"\x00video")
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    @patch.object(BlueskyClient, "login")
+    def test_send_video_rejection_produces_link_card(
+        self, mock_login: MagicMock, mock_variant: MagicMock,
+        mock_dl: MagicMock, mock_og: MagicMock
+    ) -> None:
+        """When send_video fails and tweet has a /video/ URL, produce a link card."""
+        client = BlueskyClient()
+        client._client.send_video = MagicMock(side_effect=Exception("rejected"))
+        client._client.send_post = MagicMock()
+
+        tweet = Tweet(
+            id="1",
+            text="Check this out",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="video",
+                variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
+            )],
+            urls=[{
+                "url": "https://t.co/vid1",
+                "expanded_url": "https://x.com/user/status/1/video/1",
+                "display_url": "pic.x.com/vid1",
+            }],
+        )
+
+        client.post(tweet)
+
+        # send_post was called with an embed (link card)
+        call_args = client._client.send_post.call_args
+        embed = call_args.kwargs.get("embed") or call_args[1].get("embed")
+        assert embed is not None
+        assert embed.external.uri == "https://x.com/user/status/1/video/1"
+
+
+class TestBuildLinkCardVideoFallback:
+    def test_video_url_used_as_link_card(self) -> None:
+        """A /video/ URL from twitter.com/x.com should be usable as a link card target."""
+        client = BlueskyClient()
+        tweet = Tweet(
+            id="1",
+            text="Video",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="video",
+                variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v.mp4"}],
+            )],
+            urls=[{
+                "url": "https://t.co/vid1",
+                "expanded_url": "https://x.com/user/status/1/video/1",
+                "display_url": "pic.x.com/vid1",
+            }],
+        )
+        with patch("bot.bluesky_client.fetch_og_metadata", return_value={
+            "title": "Video on X",
+            "description": "",
+            "image": "",
+        }):
+            card = client._build_link_card(tweet)
+
+        assert card is not None
+        assert card.external.uri == "https://x.com/user/status/1/video/1"
+
+    def test_photo_url_still_filtered(self) -> None:
+        """Verify /photo/ URLs are still filtered and not used as link cards."""
+        client = BlueskyClient()
+        tweet = Tweet(
+            id="1",
+            text="Photo",
+            urls=[{
+                "url": "https://t.co/img1",
+                "expanded_url": "https://twitter.com/user/status/1/photo/1",
+                "display_url": "pic.twitter.com/img1",
+            }],
+        )
+        assert client._build_link_card(tweet) is None

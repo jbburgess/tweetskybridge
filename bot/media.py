@@ -32,6 +32,41 @@ def download_image(url: str) -> bytes:
     return b"".join(chunks)
 
 
+def download_video(url: str) -> bytes:
+    """Download a video from *url* and return the raw bytes.
+
+    Uses a longer timeout and higher size limit than image downloads.
+    Raises ``ValueError`` if the response exceeds MAX_VIDEO_BYTES.
+    Raises ``requests.HTTPError`` on non-2xx responses.
+    """
+    resp = requests.get(url, timeout=config.VIDEO_TIMEOUT, stream=True)
+    resp.raise_for_status()
+
+    chunks: list[bytes] = []
+    size = 0
+    for chunk in resp.iter_content(chunk_size=256 * 1024):
+        size += len(chunk)
+        if size > config.MAX_VIDEO_BYTES:
+            raise ValueError(
+                f"Video at {url} exceeds {config.MAX_VIDEO_BYTES} byte limit"
+            )
+        chunks.append(chunk)
+
+    log.debug("Downloaded video %d bytes from %s", size, url)
+    return b"".join(chunks)
+
+
+def select_best_variant(variants: list[dict]) -> dict | None:
+    """Pick the highest-bitrate MP4 variant from a Twitter media variants list.
+
+    Returns ``None`` if no MP4 variant is found.
+    """
+    mp4s = [v for v in variants if v.get("content_type") == "video/mp4"]
+    if not mp4s:
+        return None
+    return max(mp4s, key=lambda v: int(v.get("bit_rate") or 0))
+
+
 def fetch_og_metadata(url: str) -> dict[str, str]:
     """Fetch Open Graph metadata from a URL for external embed cards.
 

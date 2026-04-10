@@ -97,7 +97,12 @@ def get_video_dimensions(data: bytes) -> tuple[int, int]:
         #       +reserved(4)+duration(4)+reserved(8)+layer(2)+alt_group(2)
         #       +volume(2)+reserved(2)+matrix(36) = 76 bytes
         #   v1: same but creation/modification/duration are 8 bytes each = 88
-        w_offset = start + (76 if version == 0 else 88)
+        if version == 0:
+            w_offset = start + 76
+        elif version == 1:
+            w_offset = start + 88
+        else:
+            return 0, 0
         if w_offset + 8 > end:
             return 0, 0
         raw_w = struct.unpack_from(">I", buf, w_offset)[0]

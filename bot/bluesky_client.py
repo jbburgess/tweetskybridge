@@ -95,13 +95,15 @@ class BlueskyClient:
             tb = build_text_builder(part_text, tweet)
 
             # First chunk continues any caller-supplied thread; subsequent
-            # chunks reply to the previous chunk within this split.
+            # chunks reply to the previous chunk within this split while
+            # preserving any existing thread root. For standalone split
+            # posts, fall back to the first chunk as the root.
             if k == 0:
                 part_parent = parent_ref
                 part_root = root_ref
             else:
                 part_parent = prev_ref
-                part_root = first_ref
+                part_root = root_ref or first_ref
 
             reply = self._build_reply_ref(part_parent, part_root)
 

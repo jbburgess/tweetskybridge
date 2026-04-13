@@ -8,7 +8,7 @@ from atproto_client.models.blob_ref import BlobRef
 
 from bot import config
 from bot.bluesky_client import BlueskyClient, BlueskyPostRef
-from bot.twitter_client import MediaItem, Tweet
+from bot.models import MediaItem, Tweet
 
 pytestmark = pytest.mark.unit
 
@@ -21,9 +21,9 @@ _FAKE_BLOB = BlobRef(
 
 @pytest.fixture(autouse=True)
 def _set_config() -> None:
-    config.BLUESKY_HANDLE = "test.bsky.social"
-    config.BLUESKY_PASSWORD = "testpass"
-    config.BLUESKY_SESSION = ""
+    config.cfg.BLUESKY_HANDLE = "test.bsky.social"
+    config.cfg.BLUESKY_PASSWORD = "testpass"
+    config.cfg.BLUESKY_SESSION = ""
 
 
 class TestLogin:
@@ -35,7 +35,7 @@ class TestLogin:
         assert client._logged_in
 
     def test_session_login(self) -> None:
-        config.BLUESKY_SESSION = "session-string"
+        config.cfg.BLUESKY_SESSION = "session-string"
         client = BlueskyClient()
         with patch.object(client._client, "login") as mock_login:
             client.login()
@@ -43,7 +43,7 @@ class TestLogin:
         assert client._logged_in
 
     def test_session_fallback_to_password(self) -> None:
-        config.BLUESKY_SESSION = "bad-session"
+        config.cfg.BLUESKY_SESSION = "bad-session"
         client = BlueskyClient()
 
         call_count = 0

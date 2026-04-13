@@ -13,10 +13,10 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture(autouse=True)
 def _set_config() -> None:
-    config.HTTP_TIMEOUT = 5
-    config.MAX_IMAGE_BYTES = 1024
-    config.VIDEO_TIMEOUT = 10
-    config.MAX_VIDEO_BYTES = 2048
+    config.cfg.HTTP_TIMEOUT = 5
+    config.cfg.MAX_IMAGE_BYTES = 1024
+    config.cfg.VIDEO_TIMEOUT = 10
+    config.cfg.MAX_VIDEO_BYTES = 2048
 
 
 class TestDownloadImage:

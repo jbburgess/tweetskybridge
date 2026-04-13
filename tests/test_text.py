@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from bot.text import _grapheme_len, _split_into_chunks, build_text_builder, resolve_urls, split_text_for_thread, truncate
-from bot.twitter_client import MediaItem, Tweet
+from bot.models import MediaItem, Tweet
 
 pytestmark = pytest.mark.unit
 

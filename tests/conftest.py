@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from bot.twitter_client import MediaItem, Tweet
+from bot.models import MediaItem, Tweet
 
 
 @pytest.fixture()

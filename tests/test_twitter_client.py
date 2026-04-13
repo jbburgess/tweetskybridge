@@ -14,8 +14,8 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture(autouse=True)
 def _set_config() -> None:
-    config.TWITTER_BEARER_TOKEN = "test-bearer-token"
-    config.TWITTER_HANDLE = "testuser"
+    config.cfg.TWITTER_BEARER_TOKEN = "test-bearer-token"
+    config.cfg.TWITTER_HANDLE = "testuser"
 
 
 def _make_tweepy_user(user_id: int = 12345, username: str = "testuser") -> SimpleNamespace:

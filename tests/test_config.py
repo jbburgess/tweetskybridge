@@ -21,10 +21,10 @@ class TestLoad:
         with patch.dict(os.environ, env, clear=False):
             config.load()
 
-        assert config.TWITTER_BEARER_TOKEN == "bearer"
-        assert config.TWITTER_HANDLE == "handle"
-        assert config.BLUESKY_HANDLE == "bsky.social"
-        assert config.BLUESKY_PASSWORD == "pass"
+        assert config.cfg.TWITTER_BEARER_TOKEN == "bearer"
+        assert config.cfg.TWITTER_HANDLE == "handle"
+        assert config.cfg.BLUESKY_HANDLE == "bsky.social"
+        assert config.cfg.BLUESKY_PASSWORD == "pass"
 
     def test_exits_on_missing_required_var(self) -> None:
         env = {
@@ -62,7 +62,7 @@ class TestLoad:
         with patch.dict(os.environ, env, clear=False):
             config.load()
 
-        assert config.BLUESKY_SESSION == "my-session"
+        assert config.cfg.BLUESKY_SESSION == "my-session"
 
     def test_optional_session_defaults_empty(self) -> None:
         env = {
@@ -75,4 +75,4 @@ class TestLoad:
         with patch.dict(os.environ, env, clear=True):
             config.load()
 
-        assert config.BLUESKY_SESSION == ""
+        assert config.cfg.BLUESKY_SESSION == ""

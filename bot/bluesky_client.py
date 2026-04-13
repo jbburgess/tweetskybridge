@@ -7,7 +7,7 @@ from atproto import Client, models
 
 from bot import config
 from bot.media import download_image, download_video, fetch_og_metadata, get_image_dimensions, get_video_dimensions, select_best_variant
-from bot.text import build_text_builder, resolve_urls, truncate
+from bot.text import build_text_builder, resolve_urls, split_text_for_thread
 from bot.twitter_client import Tweet
 
 log = logging.getLogger(__name__)
@@ -51,6 +51,21 @@ class BlueskyClient:
     # Posting
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _build_reply_ref(
+        parent_ref: BlueskyPostRef | None,
+        root_ref: BlueskyPostRef | None = None,
+    ) -> models.AppBskyFeedPost.ReplyRef | None:
+        """Construct a Bluesky reply ref, or ``None`` for top-level posts."""
+        if parent_ref is None:
+            return None
+        _parent = models.ComAtprotoRepoStrongRef.Main(uri=parent_ref.uri, cid=parent_ref.cid)
+        _root = models.ComAtprotoRepoStrongRef.Main(
+            uri=(root_ref or parent_ref).uri,
+            cid=(root_ref or parent_ref).cid,
+        )
+        return models.AppBskyFeedPost.ReplyRef(parent=_parent, root=_root)
+
     def post(
         self,
         tweet: Tweet,
@@ -58,51 +73,73 @@ class BlueskyClient:
         parent_ref: BlueskyPostRef | None = None,
         root_ref: BlueskyPostRef | None = None,
     ) -> BlueskyPostRef:
-        """Create a Bluesky post from a Tweet, including media and link cards.
+        """Create a Bluesky post (or reply thread) from a Tweet.
 
-        Pass ``parent_ref`` (and optionally ``root_ref``) to post as a reply in
-        a thread. Returns the URI+CID of the new post so callers can chain replies.
+        Long tweets are split into a chain of reply posts with ``(k/n)``
+        suffixes.  Media is attached to the first post only.  Returns the
+        URI+CID of the *last* posted record so callers can chain downstream
+        replies.
         """
         if not self._logged_in:
             self.login()
 
         text = resolve_urls(tweet)
-        text = truncate(text)
-        tb = build_text_builder(text, tweet)
+        parts = split_text_for_thread(text)
+        n = len(parts)
 
-        # Build the Bluesky reply ref when posting as part of a thread
-        reply: models.AppBskyFeedPost.ReplyRef | None = None
-        if parent_ref:
-            _parent = models.ComAtprotoRepoStrongRef.Main(uri=parent_ref.uri, cid=parent_ref.cid)
-            _root = models.ComAtprotoRepoStrongRef.Main(
-                uri=(root_ref or parent_ref).uri,
-                cid=(root_ref or parent_ref).cid,
-            )
-            reply = models.AppBskyFeedPost.ReplyRef(parent=_parent, root=_root)
+        first_ref: BlueskyPostRef | None = None
+        prev_ref: BlueskyPostRef | None = None
+        for k, part_text in enumerate(parts):
+            tb = build_text_builder(part_text, tweet)
 
-        # Video/GIF takes priority — send_video handles upload + post in one call
-        video_data, video_alt, video_w, video_h = self._prepare_video(tweet)
-        if video_data is not None:
-            try:
-                video_ar = (
-                    models.AppBskyEmbedDefs.AspectRatio(width=video_w, height=video_h)
-                    if video_w and video_h else None
-                )
-                result = self._client.send_video(
-                    text=tb, video=video_data, video_alt=video_alt,
-                    video_aspect_ratio=video_ar, reply_to=reply,
-                )
-                log.info("Posted video to Bluesky: %s", text[:60])
-                return BlueskyPostRef(uri=str(result.uri), cid=str(result.cid))
-            except Exception:
-                log.warning("Bluesky rejected video for tweet %s, falling back to link card", tweet.id)
+            # First chunk continues any caller-supplied thread; subsequent
+            # chunks reply to the previous chunk within this split.
+            if k == 0:
+                part_parent = parent_ref
+                part_root = root_ref
+            else:
+                part_parent = prev_ref
+                part_root = first_ref
 
-        # Determine embed (images take priority over link card)
-        embed = self._build_image_embed(tweet) or self._build_link_card(tweet)
+            reply = self._build_reply_ref(part_parent, part_root)
 
-        result = self._client.send_post(tb, embed=embed, reply_to=reply)
-        log.info("Posted to Bluesky: %s", text[:60])
-        return BlueskyPostRef(uri=str(result.uri), cid=str(result.cid))
+            # Attach media to the first chunk only.
+            if k == 0:
+                # Video/GIF takes priority — send_video handles upload + post
+                video_data, video_alt, video_w, video_h = self._prepare_video(tweet)
+                if video_data is not None:
+                    try:
+                        video_ar = (
+                            models.AppBskyEmbedDefs.AspectRatio(width=video_w, height=video_h)
+                            if video_w and video_h else None
+                        )
+                        result = self._client.send_video(
+                            text=tb, video=video_data, video_alt=video_alt,
+                            video_aspect_ratio=video_ar, reply_to=reply,
+                        )
+                        label = f" part 1/{n}" if n > 1 else ""
+                        log.info("Posted%s (video) to Bluesky: %s", label, part_text[:60])
+                        ref = BlueskyPostRef(uri=str(result.uri), cid=str(result.cid))
+                        first_ref = ref
+                        prev_ref = ref
+                        continue
+                    except Exception:
+                        log.warning("Bluesky rejected video for tweet %s, falling back to link card", tweet.id)
+
+                embed = self._build_image_embed(tweet) or self._build_link_card(tweet)
+            else:
+                embed = None
+
+            result = self._client.send_post(tb, embed=embed, reply_to=reply)
+            label = f" part {k + 1}/{n}" if n > 1 else ""
+            log.info("Posted%s to Bluesky: %s", label, part_text[:60])
+            ref = BlueskyPostRef(uri=str(result.uri), cid=str(result.cid))
+            if first_ref is None:
+                first_ref = ref
+            prev_ref = ref
+
+        assert prev_ref is not None  # parts is always non-empty
+        return prev_ref
 
     # ------------------------------------------------------------------
     # Embeds

@@ -794,3 +794,103 @@ class TestBuildLinkCardVideoFallback:
             }],
         )
         assert client._build_link_card(tweet) is None
+
+
+class TestMultiPartPost:
+    """Tests for the (k/n) thread-splitting behaviour on long tweets."""
+
+    # 62 words × 5 chars + 61 spaces = 371 graphemes — reliably over the 300 limit.
+    _LONG_TEXT = " ".join(["hello"] * 62)
+
+    def _make_client(self) -> BlueskyClient:
+        client = BlueskyClient()
+        client._logged_in = True
+        call_count = 0
+
+        def fake_send_post(tb, *, embed=None, reply_to=None):
+            nonlocal call_count
+            call_count += 1
+            return SimpleNamespace(uri=f"at://did/post/{call_count}", cid=f"cid{call_count}")
+
+        client._client.send_post = MagicMock(side_effect=fake_send_post)
+        client._prepare_video = MagicMock(return_value=(None, "", 0, 0))
+        client._build_image_embed = MagicMock(return_value=None)
+        client._build_link_card = MagicMock(return_value=None)
+        return client
+
+    def test_long_tweet_sends_multiple_posts(self) -> None:
+        client = self._make_client()
+        tweet = Tweet(id="1", text=self._LONG_TEXT)
+        client.post(tweet)
+        assert client._client.send_post.call_count >= 2
+
+    def test_returns_last_ref(self) -> None:
+        client = self._make_client()
+        tweet = Tweet(id="1", text=self._LONG_TEXT)
+        result = client.post(tweet)
+        n = client._client.send_post.call_count
+        assert result.uri == f"at://did/post/{n}"
+        assert result.cid == f"cid{n}"
+
+    def test_first_chunk_has_no_reply(self) -> None:
+        client = self._make_client()
+        tweet = Tweet(id="1", text=self._LONG_TEXT)
+        client.post(tweet)
+        _, first_kwargs = client._client.send_post.call_args_list[0]
+        assert first_kwargs.get("reply_to") is None
+
+    def test_second_chunk_replies_to_first(self) -> None:
+        client = self._make_client()
+        tweet = Tweet(id="1", text=self._LONG_TEXT)
+        client.post(tweet)
+        _, second_kwargs = client._client.send_post.call_args_list[1]
+        reply = second_kwargs.get("reply_to")
+        assert reply is not None
+        assert reply.parent.uri == "at://did/post/1"
+        assert reply.root.uri == "at://did/post/1"
+
+    def test_embed_only_on_first_chunk(self) -> None:
+        client = self._make_client()
+        fake_embed = object()
+        client._build_image_embed = MagicMock(return_value=fake_embed)
+        tweet = Tweet(id="1", text=self._LONG_TEXT)
+        client.post(tweet)
+        calls = client._client.send_post.call_args_list
+        _, first_kwargs = calls[0]
+        assert first_kwargs.get("embed") is fake_embed
+        for call in calls[1:]:
+            _, kwargs = call
+            assert kwargs.get("embed") is None
+
+    def test_short_tweet_single_post_no_suffix(self) -> None:
+        """Single-post tweets are unaffected — no (1/1) suffix added."""
+        client = self._make_client()
+        tweet = Tweet(id="1", text="Short tweet")
+        client.post(tweet)
+        assert client._client.send_post.call_count == 1
+        args, _ = client._client.send_post.call_args
+        tb = args[0]
+        assert "(1/1)" not in tb.build_text()
+
+    @patch.object(BlueskyClient, "login")
+    def test_first_chunk_inherits_caller_parent_ref(self, mock_login: MagicMock) -> None:
+        """When the source tweet is a reply, the first split chunk replies to the caller's parent."""
+        client = BlueskyClient()
+        client._logged_in = True
+        call_count = 0
+
+        def fake_send_post(tb, *, embed=None, reply_to=None):
+            nonlocal call_count
+            call_count += 1
+            return SimpleNamespace(uri=f"at://did/post/{call_count}", cid=f"cid{call_count}")
+
+        client._client.send_post = MagicMock(side_effect=fake_send_post)
+
+        parent = BlueskyPostRef(uri="at://did/post/0", cid="cid0")
+        tweet = Tweet(id="2", text=self._LONG_TEXT)
+        client.post(tweet, parent_ref=parent)
+
+        _, first_kwargs = client._client.send_post.call_args_list[0]
+        reply = first_kwargs.get("reply_to")
+        assert reply is not None
+        assert reply.parent.uri == "at://did/post/0"

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from bot.text import _grapheme_len, build_text_builder, resolve_urls, truncate
+from bot.text import _grapheme_len, _split_into_chunks, build_text_builder, resolve_urls, split_text_for_thread, truncate
 from bot.twitter_client import MediaItem, Tweet
 
 pytestmark = pytest.mark.unit
@@ -214,3 +214,82 @@ class TestBuildTextBuilder:
         facets = tb.build_facets()
         # Media URL was stripped, so no facets
         assert facets is None or len(facets) == 0
+
+
+class TestSplitIntoChunks:
+    def test_short_text_is_single_chunk(self) -> None:
+        chunks = _split_into_chunks("hello world", 100)
+        assert chunks == ["hello world"]
+
+    def test_splits_on_word_boundary(self) -> None:
+        # "hello world" (11) + " foo" (4) = 15; limit 11 → two chunks
+        chunks = _split_into_chunks("hello world foo", 11)
+        assert chunks[0] == "hello world"
+        assert chunks[1] == "foo"
+
+    def test_exact_fit_single_chunk(self) -> None:
+        chunks = _split_into_chunks("hello", 5)
+        assert chunks == ["hello"]
+
+    def test_each_chunk_within_limit(self) -> None:
+        text = " ".join(["word"] * 20)  # 20*4 + 19 = 99 chars
+        chunks = _split_into_chunks(text, 20)
+        for chunk in chunks:
+            assert _grapheme_len(chunk) <= 20
+
+    def test_hard_cuts_overlong_token(self) -> None:
+        long_word = "A" * 20
+        chunks = _split_into_chunks(long_word, 10)
+        assert chunks == ["A" * 10, "A" * 10]
+
+    def test_hard_cut_then_normal_word(self) -> None:
+        # 15-char token + a short word; limit = 10
+        text = "AAAAAAAAAAAAAAA hello"
+        chunks = _split_into_chunks(text, 10)
+        assert all(_grapheme_len(c) <= 10 for c in chunks)
+        assert "hello" in chunks
+
+
+class TestSplitTextForThread:
+    def test_short_text_returns_single_item_no_suffix(self) -> None:
+        parts = split_text_for_thread("Hello world")
+        assert parts == ["Hello world"]
+
+    def test_exactly_at_limit_returns_single_item(self) -> None:
+        text = "A" * 300
+        parts = split_text_for_thread(text)
+        assert len(parts) == 1
+        assert parts[0] == text
+
+    def test_over_limit_splits_with_suffix(self) -> None:
+        # 62 words of 5 chars separated by spaces = 62*5 + 61 = 371 graphemes
+        text = " ".join(["hello"] * 62)
+        parts = split_text_for_thread(text)
+        n = len(parts)
+        assert n >= 2
+        for k, part in enumerate(parts, 1):
+            assert part.endswith(f" ({k}/{n})")
+
+    def test_each_chunk_within_limit(self) -> None:
+        text = " ".join(["word"] * 120)  # ~599 graphemes
+        parts = split_text_for_thread(text)
+        for part in parts:
+            assert _grapheme_len(part) <= 300
+
+    def test_suffix_format_first_and_last(self) -> None:
+        text = " ".join(["hello"] * 62)
+        parts = split_text_for_thread(text)
+        n = len(parts)
+        assert parts[0].endswith(f" (1/{n})")
+        assert parts[-1].endswith(f" ({n}/{n})")
+
+    def test_all_words_preserved(self) -> None:
+        """Every word in the original text appears in exactly one chunk."""
+        words = [f"word{i}" for i in range(80)]  # each 5-6 chars
+        text = " ".join(words)
+        parts = split_text_for_thread(text)
+        # Strip suffix from each part and rejoin
+        import re
+        stripped_parts = [re.sub(r" \(\d+/\d+\)$", "", p) for p in parts]
+        recovered = " ".join(stripped_parts)
+        assert recovered == text

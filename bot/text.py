@@ -89,6 +89,88 @@ def truncate(text: str, limit: int = config.BLUESKY_GRAPHEME_LIMIT) -> str:
     return "".join(result).rstrip() + "…"
 
 
+def _split_into_chunks(text: str, max_graphemes: int) -> list[str]:
+    """Split *text* into chunks of at most *max_graphemes* graphemes each.
+
+    Splits on space boundaries where possible.  Performs a hard grapheme cut
+    for single tokens that exceed *max_graphemes* on their own (e.g. very long
+    URLs with no surrounding spaces).
+    """
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    for word in text.split(" "):
+        word_len = _grapheme_len(word)
+
+        # Hard-cut any single token that is longer than the limit.
+        while word_len > max_graphemes:
+            if current:
+                chunks.append(" ".join(current))
+                current = []
+                current_len = 0
+            cut: list[str] = []
+            count = 0
+            rest_start = len(word)
+            for i, ch in enumerate(word):
+                cat = unicodedata.category(ch)
+                is_grapheme = not cat.startswith("M") and ch != "\u200d"
+                if is_grapheme:
+                    if count >= max_graphemes:
+                        rest_start = i
+                        break
+                    count += 1
+                cut.append(ch)
+            else:
+                rest_start = len(word)
+            chunks.append("".join(cut))
+            word = word[rest_start:]
+            word_len = _grapheme_len(word)
+
+        if not word:
+            continue
+
+        sep = 1 if current else 0
+        if current_len + sep + word_len > max_graphemes:
+            chunks.append(" ".join(current))
+            current = [word]
+            current_len = word_len
+        else:
+            current.append(word)
+            current_len += sep + word_len
+
+    if current:
+        chunks.append(" ".join(current))
+
+    return chunks or [text]
+
+
+def split_text_for_thread(
+    text: str, limit: int = config.BLUESKY_GRAPHEME_LIMIT
+) -> list[str]:
+    """Split *text* into Bluesky-sized chunks for a reply thread.
+
+    If *text* fits within *limit* graphemes, a single-element list is returned
+    with no suffix added.  Otherwise each chunk is suffixed with `` (k/n)``
+    (counted against the limit) so no chunk exceeds it.
+    """
+    if _grapheme_len(text) <= limit:
+        return [text]
+
+    # Determine the suffix budget iteratively; converges in ≤ 2 passes.
+    # Start with 8 chars, which covers " (k/n)" for n up to 99.
+    suffix_budget = 8
+    for _ in range(3):
+        raw_chunks = _split_into_chunks(text, limit - suffix_budget)
+        n = len(raw_chunks)
+        actual_budget = _grapheme_len(f" ({n}/{n})")
+        if actual_budget == suffix_budget:
+            break
+        suffix_budget = actual_budget
+
+    return [f"{chunk} ({k}/{n})" for k, chunk in enumerate(raw_chunks, 1)]
+
+
 def build_text_builder(text: str, tweet: Tweet) -> client_utils.TextBuilder:
     """Build an atproto ``TextBuilder`` with link facets for URLs in *text*.
 

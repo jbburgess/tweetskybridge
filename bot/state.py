@@ -9,62 +9,42 @@ from bot import config
 log = logging.getLogger(__name__)
 
 
-def load_seen() -> set[str]:
-    """Load the set of previously-seen tweet IDs from the state file."""
-    path = Path(config.STATE_FILE)
+def _read_state() -> dict:
+    """Read and return the state file as a dict, handling legacy formats."""
+    path = Path(config.cfg.STATE_FILE)
     try:
         data = json.loads(path.read_text())
-        if isinstance(data, dict):
-            # New format: {"seen_ids": [...], "twitter_user_id": "..."}
-            return set(data.get("seen_ids", []))
-        # Legacy format: plain list of IDs
-        return set(data)
+        return data if isinstance(data, dict) else {"seen_ids": data}
     except (FileNotFoundError, json.JSONDecodeError):
-        return set()
+        return {}
+
+
+def _write_state(data: dict) -> None:
+    """Write *data* to the state file as formatted JSON."""
+    Path(config.cfg.STATE_FILE).write_text(json.dumps(data, indent=2) + "\n")
+
+
+def load_seen() -> set[str]:
+    """Load the set of previously-seen tweet IDs from the state file."""
+    return set(_read_state().get("seen_ids", []))
 
 
 def save_seen(seen: set[str]) -> None:
     """Persist the set of seen tweet IDs, capping at MAX_SEEN_IDS."""
-    path = Path(config.STATE_FILE)
-
-    # Keep only the most recent IDs (highest numeric value = newest)
-    trimmed = sorted(seen, key=int, reverse=True)[: config.MAX_SEEN_IDS]
-
-    # Preserve any extra fields already in the state file
-    try:
-        existing = json.loads(path.read_text())
-        if isinstance(existing, dict):
-            existing["seen_ids"] = trimmed
-            payload = existing
-        else:
-            payload = {"seen_ids": trimmed}
-    except (FileNotFoundError, json.JSONDecodeError):
-        payload = {"seen_ids": trimmed}
-
-    path.write_text(json.dumps(payload, indent=2) + "\n")
+    trimmed = sorted(seen, key=int, reverse=True)[: config.cfg.MAX_SEEN_IDS]
+    data = _read_state()
+    data["seen_ids"] = trimmed
+    _write_state(data)
     log.debug("Saved %d seen IDs", len(trimmed))
 
 
 def load_twitter_user_id() -> str | None:
     """Return the cached Twitter numeric user ID, or None."""
-    path = Path(config.STATE_FILE)
-    try:
-        data = json.loads(path.read_text())
-        if isinstance(data, dict):
-            return data.get("twitter_user_id")
-    except (FileNotFoundError, json.JSONDecodeError):
-        pass
-    return None
+    return _read_state().get("twitter_user_id")
 
 
 def save_twitter_user_id(user_id: str) -> None:
     """Cache the Twitter numeric user ID in the state file."""
-    path = Path(config.STATE_FILE)
-    try:
-        raw = json.loads(path.read_text())
-        data: dict[str, object] = raw if isinstance(raw, dict) else {"seen_ids": raw}
-    except (FileNotFoundError, json.JSONDecodeError):
-        data = {"seen_ids": []}
-
+    data = _read_state()
     data["twitter_user_id"] = user_id
-    path.write_text(json.dumps(data, indent=2) + "\n")
+    _write_state(data)

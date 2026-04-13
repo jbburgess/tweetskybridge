@@ -1,43 +1,22 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
 
 import tweepy
 from tweepy.client import Response
 
 from bot import config
+from bot.models import MediaItem, Tweet
 from bot.state import load_twitter_user_id, save_twitter_user_id
 
 log = logging.getLogger(__name__)
-
-
-@dataclass
-class MediaItem:
-    url: str
-    type: str  # "photo", "video", "animated_gif"
-    alt_text: str = ""
-    variants: list[dict] = field(default_factory=list)  # video/GIF stream variants
-    width: int = 0
-    height: int = 0
-
-
-@dataclass
-class Tweet:
-    id: str
-    text: str
-    media: list[MediaItem] = field(default_factory=list)
-    urls: list[dict[str, str]] = field(default_factory=list)  # [{url, expanded_url, display_url}]
-    reply_to_tweet_id: str | None = None  # Set for self-reply threads; Twitter ID of the parent tweet
-    conversation_id: str | None = None    # Twitter ID of the thread root (equals id for standalone posts)
-    quoted_tweet: Tweet | None = None     # Populated when this tweet quotes another tweet
 
 
 class TwitterClient:
     """Thin wrapper around tweepy for fetching tweets via Twitter API v2."""
 
     def __init__(self) -> None:
-        self._client = tweepy.Client(bearer_token=config.TWITTER_BEARER_TOKEN)
+        self._client = tweepy.Client(bearer_token=config.cfg.TWITTER_BEARER_TOKEN)
 
     def _resolve_user_id(self) -> str:
         """Return the numeric user ID for TWITTER_HANDLE, using the cache when available."""
@@ -46,13 +25,13 @@ class TwitterClient:
             log.debug("Using cached Twitter user ID: %s", cached)
             return cached
 
-        resp: Response = self._client.get_user(username=config.TWITTER_HANDLE)  # type: ignore[assignment]
+        resp: Response = self._client.get_user(username=config.cfg.TWITTER_HANDLE)  # type: ignore[assignment]
         if resp.data is None:
-            raise RuntimeError(f"Twitter user @{config.TWITTER_HANDLE} not found")
+            raise RuntimeError(f"Twitter user @{config.cfg.TWITTER_HANDLE} not found")
         user_id = str(resp.data.id)
 
         save_twitter_user_id(user_id)
-        log.info("Resolved @%s → user ID %s (cached)", config.TWITTER_HANDLE, user_id)
+        log.info("Resolved @%s → user ID %s (cached)", config.cfg.TWITTER_HANDLE, user_id)
         return user_id
 
     def fetch_recent_tweets(self, max_results: int = 5) -> list[Tweet]:
@@ -73,7 +52,7 @@ class TwitterClient:
             return []
 
         if resp.data is None:
-            log.info("No tweets returned for @%s", config.TWITTER_HANDLE)
+            log.info("No tweets returned for @%s", config.cfg.TWITTER_HANDLE)
             return []
 
         # Build a lookup from media_key → media object
@@ -191,7 +170,7 @@ class TwitterClient:
                 quoted_tweet=quoted_tweet,
             ))
 
-        log.info("Fetched %d tweets from @%s", len(tweets), config.TWITTER_HANDLE)
+        log.info("Fetched %d tweets from @%s", len(tweets), config.cfg.TWITTER_HANDLE)
         # Twitter returns newest-first; reverse to chronological order
         tweets.reverse()
         return tweets

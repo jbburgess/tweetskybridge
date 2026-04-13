@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import logging
 import unicodedata
 
@@ -58,7 +59,7 @@ def resolve_urls(tweet: Tweet) -> str:
 
         text = text.replace(short, expanded)
 
-    return text.strip()
+    return html.unescape(text.strip())
 
 
 def truncate(text: str, limit: int = config.BLUESKY_GRAPHEME_LIMIT) -> str:

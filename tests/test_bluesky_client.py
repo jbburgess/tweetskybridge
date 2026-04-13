@@ -892,3 +892,380 @@ class TestMultiPartPost:
         reply = first_kwargs.get("reply_to")
         assert reply is not None
         assert reply.parent.uri == "at://did/post/0"
+
+
+class TestHasMixedMedia:
+    def test_photo_and_video(self) -> None:
+        tweet = Tweet(
+            id="1",
+            text="mixed",
+            media=[
+                MediaItem(url="https://pbs.twimg.com/1.jpg", type="photo"),
+                MediaItem(
+                    url="https://pbs.twimg.com/thumb.jpg",
+                    type="video",
+                    variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v.mp4"}],
+                ),
+            ],
+        )
+        assert BlueskyClient._has_mixed_media(tweet) is True
+
+    def test_photo_and_animated_gif(self) -> None:
+        tweet = Tweet(
+            id="1",
+            text="mixed gif",
+            media=[
+                MediaItem(url="https://pbs.twimg.com/1.jpg", type="photo"),
+                MediaItem(
+                    url="https://pbs.twimg.com/thumb.jpg",
+                    type="animated_gif",
+                    variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/g.mp4"}],
+                ),
+            ],
+        )
+        assert BlueskyClient._has_mixed_media(tweet) is True
+
+    def test_photo_only(self) -> None:
+        tweet = Tweet(
+            id="1",
+            text="photos",
+            media=[MediaItem(url="https://pbs.twimg.com/1.jpg", type="photo")],
+        )
+        assert BlueskyClient._has_mixed_media(tweet) is False
+
+    def test_video_only(self) -> None:
+        tweet = Tweet(
+            id="1",
+            text="video",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="video",
+                variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v.mp4"}],
+            )],
+        )
+        assert BlueskyClient._has_mixed_media(tweet) is False
+
+    def test_no_media(self) -> None:
+        tweet = Tweet(id="1", text="text only")
+        assert BlueskyClient._has_mixed_media(tweet) is False
+
+    def test_video_without_variants_not_mixed(self) -> None:
+        """A video with no downloadable variants doesn't count."""
+        tweet = Tweet(
+            id="1",
+            text="mixed?",
+            media=[
+                MediaItem(url="https://pbs.twimg.com/1.jpg", type="photo"),
+                MediaItem(url="https://pbs.twimg.com/thumb.jpg", type="video", variants=[]),
+            ],
+        )
+        assert BlueskyClient._has_mixed_media(tweet) is False
+
+
+class TestMixedMediaPost:
+    """Tests for mixed-media tweets: images on main post, videos as replies."""
+
+    @patch("bot.bluesky_client.download_video", return_value=b"\x00video")
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    @patch("bot.bluesky_client.download_image", return_value=b"\xff\xd8fake-jpg")
+    @patch.object(BlueskyClient, "login")
+    def test_images_on_main_post_video_as_reply(
+        self, mock_login: MagicMock, mock_dl_img: MagicMock,
+        mock_variant: MagicMock, mock_dl_vid: MagicMock,
+    ) -> None:
+        client = BlueskyClient()
+        client._logged_in = True
+        blob_resp = SimpleNamespace(blob=_FAKE_BLOB)
+        client._client.upload_blob = MagicMock(return_value=blob_resp)
+
+        post_count = 0
+
+        def fake_send_post(tb, *, embed=None, reply_to=None):
+            nonlocal post_count
+            post_count += 1
+            return SimpleNamespace(uri=f"at://did/post/{post_count}", cid=f"cid{post_count}")
+
+        client._client.send_post = MagicMock(side_effect=fake_send_post)
+
+        video_count = 0
+
+        def fake_send_video(*, text, video, video_alt, video_aspect_ratio=None, reply_to=None):
+            nonlocal video_count
+            video_count += 1
+            return SimpleNamespace(uri=f"at://did/video/{video_count}", cid=f"vidcid{video_count}")
+
+        client._client.send_video = MagicMock(side_effect=fake_send_video)
+
+        tweet = Tweet(
+            id="1",
+            text="Photos and video",
+            media=[
+                MediaItem(url="https://pbs.twimg.com/1.jpg", type="photo", alt_text="pic"),
+                MediaItem(
+                    url="https://pbs.twimg.com/thumb.jpg",
+                    type="video",
+                    alt_text="clip",
+                    variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
+                ),
+            ],
+        )
+
+        result = client.post(tweet)
+
+        # Main post used send_post with an image embed
+        client._client.send_post.assert_called_once()
+        _, post_kwargs = client._client.send_post.call_args
+        assert post_kwargs["embed"] is not None  # image embed
+        assert post_kwargs["reply_to"] is None  # standalone
+
+        # Video posted as reply
+        client._client.send_video.assert_called_once()
+        vid_kwargs = client._client.send_video.call_args.kwargs
+        assert vid_kwargs["video"] == b"\x00video"
+        assert vid_kwargs["video_alt"] == "clip"
+        assert vid_kwargs["text"] == ""
+        assert vid_kwargs["reply_to"] is not None
+        assert vid_kwargs["reply_to"].parent.uri == "at://did/post/1"
+
+        # Return value is the video reply ref
+        assert result.uri == "at://did/video/1"
+
+    @patch("bot.bluesky_client.download_video", return_value=b"\x00video")
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    @patch("bot.bluesky_client.download_image", return_value=b"\xff\xd8fake-jpg")
+    @patch.object(BlueskyClient, "login")
+    def test_multiple_videos_chained_as_replies(
+        self, mock_login: MagicMock, mock_dl_img: MagicMock,
+        mock_variant: MagicMock, mock_dl_vid: MagicMock,
+    ) -> None:
+        client = BlueskyClient()
+        client._logged_in = True
+        blob_resp = SimpleNamespace(blob=_FAKE_BLOB)
+        client._client.upload_blob = MagicMock(return_value=blob_resp)
+
+        post_count = 0
+
+        def fake_send_post(tb, *, embed=None, reply_to=None):
+            nonlocal post_count
+            post_count += 1
+            return SimpleNamespace(uri=f"at://did/post/{post_count}", cid=f"cid{post_count}")
+
+        client._client.send_post = MagicMock(side_effect=fake_send_post)
+
+        video_count = 0
+
+        def fake_send_video(*, text, video, video_alt, video_aspect_ratio=None, reply_to=None):
+            nonlocal video_count
+            video_count += 1
+            return SimpleNamespace(uri=f"at://did/video/{video_count}", cid=f"vidcid{video_count}")
+
+        client._client.send_video = MagicMock(side_effect=fake_send_video)
+
+        tweet = Tweet(
+            id="1",
+            text="Multi video",
+            media=[
+                MediaItem(url="https://pbs.twimg.com/1.jpg", type="photo"),
+                MediaItem(
+                    url="https://pbs.twimg.com/thumb1.jpg",
+                    type="video",
+                    variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/1.mp4"}],
+                ),
+                MediaItem(
+                    url="https://pbs.twimg.com/thumb2.jpg",
+                    type="video",
+                    variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/2.mp4"}],
+                ),
+            ],
+        )
+
+        result = client.post(tweet)
+
+        assert client._client.send_video.call_count == 2
+
+        # First video reply chains off the main post
+        first_vid = client._client.send_video.call_args_list[0].kwargs
+        assert first_vid["reply_to"].parent.uri == "at://did/post/1"
+        assert first_vid["reply_to"].root.uri == "at://did/post/1"
+
+        # Second video reply chains off the first video reply
+        second_vid = client._client.send_video.call_args_list[1].kwargs
+        assert second_vid["reply_to"].parent.uri == "at://did/video/1"
+        assert second_vid["reply_to"].root.uri == "at://did/post/1"
+
+        # Return value is the last video reply
+        assert result.uri == "at://did/video/2"
+
+    @patch("bot.bluesky_client.download_video", side_effect=Exception("timeout"))
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    @patch("bot.bluesky_client.download_image", return_value=b"\xff\xd8fake-jpg")
+    @patch.object(BlueskyClient, "login")
+    def test_video_download_failure_still_posts_images(
+        self, mock_login: MagicMock, mock_dl_img: MagicMock,
+        mock_variant: MagicMock, mock_dl_vid: MagicMock,
+    ) -> None:
+        client = BlueskyClient()
+        client._logged_in = True
+        blob_resp = SimpleNamespace(blob=_FAKE_BLOB)
+        client._client.upload_blob = MagicMock(return_value=blob_resp)
+        client._client.send_post = MagicMock(
+            return_value=SimpleNamespace(uri="at://did/post/1", cid="cid1")
+        )
+        client._client.send_video = MagicMock()
+
+        tweet = Tweet(
+            id="1",
+            text="Mixed but video fails",
+            media=[
+                MediaItem(url="https://pbs.twimg.com/1.jpg", type="photo"),
+                MediaItem(
+                    url="https://pbs.twimg.com/thumb.jpg",
+                    type="video",
+                    variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
+                ),
+            ],
+        )
+
+        result = client.post(tweet)
+
+        # Main post still succeeded with images
+        client._client.send_post.assert_called_once()
+        # Video reply was never attempted (download failed in _prepare_single_video)
+        client._client.send_video.assert_not_called()
+        # Returned the main post ref
+        assert result.uri == "at://did/post/1"
+
+    @patch("bot.bluesky_client.download_video", return_value=b"\x00video")
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    @patch("bot.bluesky_client.download_image", return_value=b"\xff\xd8fake-jpg")
+    @patch.object(BlueskyClient, "login")
+    def test_send_video_rejection_continues(
+        self, mock_login: MagicMock, mock_dl_img: MagicMock,
+        mock_variant: MagicMock, mock_dl_vid: MagicMock,
+    ) -> None:
+        """When send_video fails for a mixed-media reply, it is skipped gracefully."""
+        client = BlueskyClient()
+        client._logged_in = True
+        blob_resp = SimpleNamespace(blob=_FAKE_BLOB)
+        client._client.upload_blob = MagicMock(return_value=blob_resp)
+        client._client.send_post = MagicMock(
+            return_value=SimpleNamespace(uri="at://did/post/1", cid="cid1")
+        )
+        client._client.send_video = MagicMock(side_effect=Exception("rejected"))
+
+        tweet = Tweet(
+            id="1",
+            text="Mixed media",
+            media=[
+                MediaItem(url="https://pbs.twimg.com/1.jpg", type="photo"),
+                MediaItem(
+                    url="https://pbs.twimg.com/thumb.jpg",
+                    type="video",
+                    variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
+                ),
+            ],
+        )
+
+        result = client.post(tweet)
+
+        # Main post succeeded
+        client._client.send_post.assert_called_once()
+        # Video reply was attempted but failed
+        client._client.send_video.assert_called_once()
+        # Returned the main post ref (video failed)
+        assert result.uri == "at://did/post/1"
+
+    @patch("bot.bluesky_client.download_video", return_value=b"\x00video")
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    @patch("bot.bluesky_client.download_image", return_value=b"\xff\xd8fake-jpg")
+    @patch.object(BlueskyClient, "login")
+    def test_video_only_tweet_unchanged(
+        self, mock_login: MagicMock, mock_dl_img: MagicMock,
+        mock_variant: MagicMock, mock_dl_vid: MagicMock,
+    ) -> None:
+        """A video-only tweet (no photos) still uses send_video on the main post."""
+        client = BlueskyClient()
+        client._logged_in = True
+        client._client.send_post = MagicMock()
+        client._client.send_video = MagicMock(
+            return_value=SimpleNamespace(uri="at://did/video/1", cid="vidcid1")
+        )
+
+        tweet = Tweet(
+            id="1",
+            text="Video only",
+            media=[MediaItem(
+                url="https://pbs.twimg.com/thumb.jpg",
+                type="video",
+                variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
+            )],
+        )
+
+        result = client.post(tweet)
+
+        # Used send_video directly, not send_post
+        client._client.send_video.assert_called_once()
+        client._client.send_post.assert_not_called()
+        assert result.uri == "at://did/video/1"
+
+
+class TestPrepareSingleVideo:
+    @patch("bot.bluesky_client.download_video", return_value=b"\x00\x00video-bytes")
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "bit_rate": 2176000,
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    def test_returns_data_for_single_item(self, mock_variant: MagicMock, mock_dl: MagicMock) -> None:
+        item = MediaItem(
+            url="https://pbs.twimg.com/thumb.jpg",
+            type="video",
+            alt_text="Goal",
+            width=1920,
+            height=1080,
+            variants=[{"content_type": "video/mp4", "bit_rate": 2176000, "url": "https://video.twimg.com/v/hi.mp4"}],
+        )
+        data, alt, w, h = BlueskyClient._prepare_single_video(item)
+        assert data == b"\x00\x00video-bytes"
+        assert alt == "Goal"
+        assert w == 1920
+        assert h == 1080
+
+    @patch("bot.bluesky_client.select_best_variant", return_value=None)
+    def test_no_mp4_variant_returns_none(self, mock_variant: MagicMock) -> None:
+        item = MediaItem(
+            url="https://pbs.twimg.com/thumb.jpg",
+            type="video",
+            variants=[{"content_type": "application/x-mpegURL", "url": "https://video.twimg.com/v/playlist.m3u8"}],
+        )
+        data, alt, w, h = BlueskyClient._prepare_single_video(item)
+        assert data is None
+
+    @patch("bot.bluesky_client.download_video", side_effect=Exception("fail"))
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    def test_download_failure_returns_none(self, mock_variant: MagicMock, mock_dl: MagicMock) -> None:
+        item = MediaItem(
+            url="https://pbs.twimg.com/thumb.jpg",
+            type="video",
+            variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
+        )
+        data, alt, w, h = BlueskyClient._prepare_single_video(item)
+        assert data is None

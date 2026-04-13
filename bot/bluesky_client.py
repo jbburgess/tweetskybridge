@@ -7,7 +7,7 @@ from atproto import Client, models
 
 from bot import config
 from bot.media import download_image, download_video, fetch_og_metadata, get_image_dimensions, get_video_dimensions, select_best_variant
-from bot.models import Tweet
+from bot.models import MediaItem, Tweet
 from bot.text import build_text_builder, resolve_urls, split_text_for_thread
 from bot.urls import is_twitter_photo_url, is_twitter_status_url
 
@@ -87,6 +87,7 @@ class BlueskyClient:
         text = resolve_urls(tweet)
         parts = split_text_for_thread(text)
         n = len(parts)
+        mixed = self._has_mixed_media(tweet)
 
         first_ref: BlueskyPostRef | None = None
         prev_ref: BlueskyPostRef | None = None
@@ -106,28 +107,33 @@ class BlueskyClient:
 
             # Attach media to the first chunk only.
             if k == 0:
-                # Video/GIF takes priority — send_video handles upload + post
-                video_data, video_alt, video_w, video_h = self._prepare_video(tweet)
-                if video_data is not None:
-                    try:
-                        video_ar = (
-                            models.AppBskyEmbedDefs.AspectRatio(width=video_w, height=video_h)
-                            if video_w and video_h else None
-                        )
-                        result = self._client.send_video(
-                            text=tb, video=video_data, video_alt=video_alt,
-                            video_aspect_ratio=video_ar, reply_to=reply,
-                        )
-                        label = f" part 1/{n}" if n > 1 else ""
-                        log.info("Posted%s (video) to Bluesky: %s", label, part_text[:60])
-                        ref = BlueskyPostRef(uri=str(result.uri), cid=str(result.cid))
-                        first_ref = ref
-                        prev_ref = ref
-                        continue
-                    except Exception:
-                        log.warning("Bluesky rejected video for tweet %s, falling back to link card", tweet.id)
+                # For mixed-media tweets, prioritise the image gallery on the
+                # main post and defer videos to threaded replies below.
+                if mixed:
+                    embed = self._build_image_embed(tweet) or self._build_link_card(tweet)
+                else:
+                    # Video/GIF takes priority — send_video handles upload + post
+                    video_data, video_alt, video_w, video_h = self._prepare_video(tweet)
+                    if video_data is not None:
+                        try:
+                            video_ar = (
+                                models.AppBskyEmbedDefs.AspectRatio(width=video_w, height=video_h)
+                                if video_w and video_h else None
+                            )
+                            result = self._client.send_video(
+                                text=tb, video=video_data, video_alt=video_alt,
+                                video_aspect_ratio=video_ar, reply_to=reply,
+                            )
+                            label = f" part 1/{n}" if n > 1 else ""
+                            log.info("Posted%s (video) to Bluesky: %s", label, part_text[:60])
+                            ref = BlueskyPostRef(uri=str(result.uri), cid=str(result.cid))
+                            first_ref = ref
+                            prev_ref = ref
+                            continue
+                        except Exception:
+                            log.warning("Bluesky rejected video for tweet %s, falling back to link card", tweet.id)
 
-                embed = self._build_image_embed(tweet) or self._build_link_card(tweet)
+                    embed = self._build_image_embed(tweet) or self._build_link_card(tweet)
             else:
                 embed = None
 
@@ -140,11 +146,48 @@ class BlueskyClient:
             prev_ref = ref
 
         assert prev_ref is not None  # parts is always non-empty
+
+        # For mixed-media tweets, post each video/GIF as a threaded reply.
+        if mixed:
+            video_items = [
+                m for m in tweet.media
+                if m.type in ("video", "animated_gif") and m.variants
+            ]
+            for item in video_items:
+                video_data, video_alt, video_w, video_h = self._prepare_single_video(item)
+                if video_data is None:
+                    continue
+                try:
+                    video_ar = (
+                        models.AppBskyEmbedDefs.AspectRatio(width=video_w, height=video_h)
+                        if video_w and video_h else None
+                    )
+                    reply = self._build_reply_ref(prev_ref, first_ref)
+                    result = self._client.send_video(
+                        text="", video=video_data, video_alt=video_alt,
+                        video_aspect_ratio=video_ar, reply_to=reply,
+                    )
+                    log.info("Posted video reply to Bluesky for tweet %s", tweet.id)
+                    ref = BlueskyPostRef(uri=str(result.uri), cid=str(result.cid))
+                    prev_ref = ref
+                except Exception:
+                    log.warning("Failed to post video reply for tweet %s, skipping", tweet.id)
+
         return prev_ref
 
     # ------------------------------------------------------------------
     # Embeds
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _has_mixed_media(tweet: Tweet) -> bool:
+        """Return ``True`` if *tweet* contains both photos and videos/GIFs."""
+        has_photo = any(m.type == "photo" and m.url for m in tweet.media)
+        has_video = any(
+            m.type in ("video", "animated_gif") and m.variants
+            for m in tweet.media
+        )
+        return has_photo and has_video
 
     def _build_image_embed(self, tweet: Tweet) -> models.AppBskyEmbedImages.Main | None:
         """Download tweet images and build an image embed (up to 4)."""
@@ -190,7 +233,15 @@ class BlueskyClient:
         if not videos:
             return None, "", 0, 0
 
-        item = videos[0]  # Bluesky supports one video per post
+        return self._prepare_single_video(videos[0])
+
+    @staticmethod
+    def _prepare_single_video(item: "MediaItem") -> tuple[bytes | None, str, int, int]:
+        """Download a single video/GIF *item*.
+
+        Returns ``(video_bytes, alt_text, width, height)`` on success or
+        ``(None, "", 0, 0)`` on failure.
+        """
         variant = select_best_variant(item.variants)
         if not variant:
             log.warning("No MP4 variant found for video media")

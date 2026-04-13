@@ -7,7 +7,7 @@ import pytest
 from atproto_client.models.blob_ref import BlobRef
 
 from bot import config
-from bot.bluesky_client import BlueskyClient
+from bot.bluesky_client import BlueskyClient, BlueskyPostRef
 from bot.twitter_client import MediaItem, Tweet
 
 pytestmark = pytest.mark.unit
@@ -256,7 +256,7 @@ class TestPost:
     @patch.object(BlueskyClient, "login")
     def test_auto_login_if_not_logged_in(self, mock_login: MagicMock, mock_dl: MagicMock) -> None:
         client = BlueskyClient()
-        client._client.send_post = MagicMock()
+        client._client.send_post = MagicMock(return_value=SimpleNamespace(uri="at://did/post/1", cid="cid1"))
         blob_resp = SimpleNamespace(blob=_FAKE_BLOB)
         client._client.upload_blob = MagicMock(return_value=blob_resp)
 
@@ -266,6 +266,69 @@ class TestPost:
 
         mock_login.assert_called_once()
         client._client.send_post.assert_called_once()
+
+    @patch.object(BlueskyClient, "login")
+    def test_post_returns_bluesky_post_ref(self, mock_login: MagicMock) -> None:
+        client = BlueskyClient()
+        client._logged_in = True
+        client._client.send_post = MagicMock(
+            return_value=SimpleNamespace(uri="at://did/post/42", cid="bafycid42")
+        )
+
+        result = client.post(Tweet(id="1", text="hello"))
+
+        assert isinstance(result, BlueskyPostRef)
+        assert result.uri == "at://did/post/42"
+        assert result.cid == "bafycid42"
+
+    @patch.object(BlueskyClient, "login")
+    def test_reply_passes_reply_to_send_post(self, mock_login: MagicMock) -> None:
+        from atproto import models as bsky_models
+
+        client = BlueskyClient()
+        client._logged_in = True
+        client._client.send_post = MagicMock(
+            return_value=SimpleNamespace(uri="at://did/post/2", cid="bafycid2")
+        )
+
+        parent = BlueskyPostRef(uri="at://did/post/1", cid="bafycid1")
+        client.post(Tweet(id="2", text="reply"), parent_ref=parent)
+
+        _, kwargs = client._client.send_post.call_args
+        reply = kwargs.get("reply_to")
+        assert reply is not None
+        assert reply.parent.uri == "at://did/post/1"
+        assert reply.root.uri == "at://did/post/1"  # root defaults to parent for 2-tweet threads
+
+    @patch.object(BlueskyClient, "login")
+    def test_reply_uses_explicit_root_ref(self, mock_login: MagicMock) -> None:
+        client = BlueskyClient()
+        client._logged_in = True
+        client._client.send_post = MagicMock(
+            return_value=SimpleNamespace(uri="at://did/post/3", cid="bafycid3")
+        )
+
+        parent = BlueskyPostRef(uri="at://did/post/2", cid="bafycid2")
+        root = BlueskyPostRef(uri="at://did/post/1", cid="bafycid1")
+        client.post(Tweet(id="3", text="reply to reply"), parent_ref=parent, root_ref=root)
+
+        _, kwargs = client._client.send_post.call_args
+        reply = kwargs.get("reply_to")
+        assert reply.parent.uri == "at://did/post/2"
+        assert reply.root.uri == "at://did/post/1"
+
+    @patch.object(BlueskyClient, "login")
+    def test_standalone_post_has_no_reply_ref(self, mock_login: MagicMock) -> None:
+        client = BlueskyClient()
+        client._logged_in = True
+        client._client.send_post = MagicMock(
+            return_value=SimpleNamespace(uri="at://did/post/1", cid="bafycid1")
+        )
+
+        client.post(Tweet(id="1", text="standalone"))
+
+        _, kwargs = client._client.send_post.call_args
+        assert kwargs.get("reply_to") is None
 
 
 class TestPrepareVideo:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from atproto import Client, models
 
@@ -10,6 +11,14 @@ from bot.text import build_text_builder, resolve_urls, truncate
 from bot.twitter_client import Tweet
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class BlueskyPostRef:
+    """URI + CID of a posted Bluesky record, used to chain reply threads."""
+
+    uri: str
+    cid: str
 
 
 class BlueskyClient:
@@ -42,14 +51,34 @@ class BlueskyClient:
     # Posting
     # ------------------------------------------------------------------
 
-    def post(self, tweet: Tweet) -> None:
-        """Create a Bluesky post from a Tweet, including media and link cards."""
+    def post(
+        self,
+        tweet: Tweet,
+        *,
+        parent_ref: BlueskyPostRef | None = None,
+        root_ref: BlueskyPostRef | None = None,
+    ) -> BlueskyPostRef:
+        """Create a Bluesky post from a Tweet, including media and link cards.
+
+        Pass ``parent_ref`` (and optionally ``root_ref``) to post as a reply in
+        a thread. Returns the URI+CID of the new post so callers can chain replies.
+        """
         if not self._logged_in:
             self.login()
 
         text = resolve_urls(tweet)
         text = truncate(text)
         tb = build_text_builder(text, tweet)
+
+        # Build the Bluesky reply ref when posting as part of a thread
+        reply: models.AppBskyFeedPost.ReplyRef | None = None
+        if parent_ref:
+            _parent = models.ComAtprotoRepoStrongRef.Main(uri=parent_ref.uri, cid=parent_ref.cid)
+            _root = models.ComAtprotoRepoStrongRef.Main(
+                uri=(root_ref or parent_ref).uri,
+                cid=(root_ref or parent_ref).cid,
+            )
+            reply = models.AppBskyFeedPost.ReplyRef(parent=_parent, root=_root)
 
         # Video/GIF takes priority — send_video handles upload + post in one call
         video_data, video_alt, video_w, video_h = self._prepare_video(tweet)
@@ -59,17 +88,21 @@ class BlueskyClient:
                     models.AppBskyEmbedDefs.AspectRatio(width=video_w, height=video_h)
                     if video_w and video_h else None
                 )
-                self._client.send_video(text=tb, video=video_data, video_alt=video_alt, video_aspect_ratio=video_ar)
+                result = self._client.send_video(
+                    text=tb, video=video_data, video_alt=video_alt,
+                    video_aspect_ratio=video_ar, reply_to=reply,
+                )
                 log.info("Posted video to Bluesky: %s", text[:60])
-                return
+                return BlueskyPostRef(uri=str(result.uri), cid=str(result.cid))
             except Exception:
                 log.warning("Bluesky rejected video for tweet %s, falling back to link card", tweet.id)
 
         # Determine embed (images take priority over link card)
         embed = self._build_image_embed(tweet) or self._build_link_card(tweet)
 
-        self._client.send_post(tb, embed=embed)
+        result = self._client.send_post(tb, embed=embed, reply_to=reply)
         log.info("Posted to Bluesky: %s", text[:60])
+        return BlueskyPostRef(uri=str(result.uri), cid=str(result.cid))
 
     # ------------------------------------------------------------------
     # Embeds

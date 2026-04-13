@@ -28,6 +28,8 @@ class Tweet:
     text: str
     media: list[MediaItem] = field(default_factory=list)
     urls: list[dict[str, str]] = field(default_factory=list)  # [{url, expanded_url, display_url}]
+    reply_to_tweet_id: str | None = None  # Set for self-reply threads; Twitter ID of the parent tweet
+    conversation_id: str | None = None    # Twitter ID of the thread root (equals id for standalone posts)
 
 
 class TwitterClient:
@@ -61,7 +63,7 @@ class TwitterClient:
                 id=user_id,
                 max_results=max_results,
                 exclude=["retweets", "replies"],
-                tweet_fields=["created_at", "entities"],
+                tweet_fields=["created_at", "entities", "referenced_tweets", "in_reply_to_user_id", "conversation_id"],
                 expansions=["attachments.media_keys"],
                 media_fields=["url", "preview_image_url", "type", "alt_text", "variants", "width", "height"],
             )
@@ -123,11 +125,21 @@ class TwitterClient:
                         "display_url": u.get("display_url", ""),
                     })
 
+            # Detect self-reply (thread continuation by the same account)
+            reply_to_tweet_id: str | None = None
+            if str(getattr(t, "in_reply_to_user_id", None) or "") == user_id:
+                for ref in getattr(t, "referenced_tweets", None) or []:
+                    if getattr(ref, "type", None) == "replied_to":
+                        reply_to_tweet_id = str(ref.id)
+                        break
+
             tweets.append(Tweet(
                 id=str(t.id),
                 text=t.text,
                 media=media_items,
                 urls=url_entities,
+                reply_to_tweet_id=reply_to_tweet_id,
+                conversation_id=str(getattr(t, "conversation_id", None) or t.id),
             ))
 
         log.info("Fetched %d tweets from @%s", len(tweets), config.TWITTER_HANDLE)

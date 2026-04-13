@@ -30,6 +30,7 @@ class Tweet:
     urls: list[dict[str, str]] = field(default_factory=list)  # [{url, expanded_url, display_url}]
     reply_to_tweet_id: str | None = None  # Set for self-reply threads; Twitter ID of the parent tweet
     conversation_id: str | None = None    # Twitter ID of the thread root (equals id for standalone posts)
+    quoted_tweet: Tweet | None = None     # Populated when this tweet quotes another tweet
 
 
 class TwitterClient:
@@ -64,7 +65,7 @@ class TwitterClient:
                 max_results=max_results,
                 exclude=["retweets", "replies"],
                 tweet_fields=["created_at", "entities", "referenced_tweets", "in_reply_to_user_id", "conversation_id"],
-                expansions=["attachments.media_keys"],
+                expansions=["attachments.media_keys", "referenced_tweets.id", "referenced_tweets.id.attachments.media_keys"],
                 media_fields=["url", "preview_image_url", "type", "alt_text", "variants", "width", "height"],
             )
         except tweepy.TooManyRequests:
@@ -80,6 +81,12 @@ class TwitterClient:
         if resp.includes and "media" in resp.includes:
             for m in resp.includes["media"]:
                 media_lookup[m.media_key] = m
+
+        # Build a lookup from tweet ID → included tweet object (for quote tweet expansion)
+        included_tweets: dict[str, tweepy.Tweet] = {}
+        if resp.includes and "tweets" in resp.includes:
+            for qt in resp.includes["tweets"]:
+                included_tweets[str(qt.id)] = qt
 
         tweets: list[Tweet] = []
         for t in resp.data:
@@ -133,6 +140,47 @@ class TwitterClient:
                         reply_to_tweet_id = str(ref.id)
                         break
 
+            # Detect and hydrate quoted tweet
+            quoted_tweet: Tweet | None = None
+            for ref in getattr(t, "referenced_tweets", None) or []:
+                if getattr(ref, "type", None) != "quoted":
+                    continue
+                qt_obj = included_tweets.get(str(ref.id))
+                if qt_obj is None:
+                    break
+                # Build media items for the quoted tweet (media objects land in the shared pool)
+                qt_media: list[MediaItem] = []
+                qt_attachments = getattr(qt_obj, "attachments", None)
+                if qt_attachments and "media_keys" in qt_attachments:
+                    for key in qt_attachments["media_keys"]:
+                        qm = media_lookup.get(key)
+                        if qm is None:
+                            continue
+                        qt_media.append(MediaItem(
+                            url=qm.url or qm.preview_image_url or "",
+                            type=qm.type or "photo",
+                            alt_text=getattr(qm, "alt_text", "") or "",
+                            width=getattr(qm, "width", 0) or 0,
+                            height=getattr(qm, "height", 0) or 0,
+                        ))
+                # Build URL entities for the quoted tweet
+                qt_urls: list[dict[str, str]] = []
+                qt_entities = getattr(qt_obj, "entities", None)
+                if qt_entities and "urls" in qt_entities:
+                    for u in qt_entities["urls"]:
+                        qt_urls.append({
+                            "url": u.get("url", ""),
+                            "expanded_url": u.get("expanded_url", ""),
+                            "display_url": u.get("display_url", ""),
+                        })
+                quoted_tweet = Tweet(
+                    id=str(ref.id),
+                    text=getattr(qt_obj, "text", "") or "",
+                    media=qt_media,
+                    urls=qt_urls,
+                )
+                break
+
             tweets.append(Tweet(
                 id=str(t.id),
                 text=t.text,
@@ -140,6 +188,7 @@ class TwitterClient:
                 urls=url_entities,
                 reply_to_tweet_id=reply_to_tweet_id,
                 conversation_id=str(getattr(t, "conversation_id", None) or t.id),
+                quoted_tweet=quoted_tweet,
             ))
 
         log.info("Fetched %d tweets from @%s", len(tweets), config.TWITTER_HANDLE)

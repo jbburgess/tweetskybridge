@@ -57,6 +57,14 @@ def resolve_urls(tweet: Tweet) -> str:
             text = text.replace(short, "").strip()
             continue
 
+        # Strip the quoted tweet's status URL — the link card embed handles it
+        if tweet.quoted_tweet is not None and f"/status/{tweet.quoted_tweet.id}" in expanded and (
+            expanded.startswith("https://twitter.com/") or
+            expanded.startswith("https://x.com/")
+        ):
+            text = text.replace(short, "").strip()
+            continue
+
         text = text.replace(short, expanded)
 
     return html.unescape(text.strip())

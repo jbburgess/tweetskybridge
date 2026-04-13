@@ -88,6 +88,53 @@ class TestResolveUrls:
         result = resolve_urls(tweet)
         assert result == "GIF time"
 
+    def test_strips_quoted_tweet_url_twitter(self) -> None:
+        quoted = Tweet(id="999", text="quoted text")
+        tweet = Tweet(
+            id="1000",
+            text="bringing home https://t.co/abc",
+            urls=[{
+                "url": "https://t.co/abc",
+                "expanded_url": "https://twitter.com/MLS/status/999",
+                "display_url": "twitter.com/MLS/status/999",
+            }],
+            quoted_tweet=quoted,
+        )
+        result = resolve_urls(tweet)
+        assert "https://t.co/abc" not in result
+        assert "twitter.com" not in result
+        assert result == "bringing home"
+
+    def test_strips_quoted_tweet_url_xcom(self) -> None:
+        quoted = Tweet(id="888", text="quoted text")
+        tweet = Tweet(
+            id="1001",
+            text="wow https://t.co/xyz",
+            urls=[{
+                "url": "https://t.co/xyz",
+                "expanded_url": "https://x.com/SJEarthquakes/status/888",
+                "display_url": "x.com/SJEarthquakes/status/888",
+            }],
+            quoted_tweet=quoted,
+        )
+        result = resolve_urls(tweet)
+        assert result == "wow"
+
+    def test_non_quote_tweet_status_url_not_stripped(self) -> None:
+        """A twitter.com/status URL that is NOT the quoted tweet is kept as a link."""
+        tweet = Tweet(
+            id="1002",
+            text="check this out https://t.co/lnk",
+            urls=[{
+                "url": "https://t.co/lnk",
+                "expanded_url": "https://twitter.com/MLS/status/777",
+                "display_url": "twitter.com/MLS/status/777",
+            }],
+            quoted_tweet=None,
+        )
+        result = resolve_urls(tweet)
+        assert "https://twitter.com/MLS/status/777" in result
+
 
 class TestGraphemeLen:
     def test_ascii(self) -> None:

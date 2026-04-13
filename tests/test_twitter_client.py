@@ -419,3 +419,83 @@ class TestFetchRecentTweets:
         tweets = client.fetch_recent_tweets()
 
         assert tweets[0].reply_to_tweet_id is None
+
+    @patch("bot.twitter_client.save_twitter_user_id")
+    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
+    def test_quoted_tweet_is_hydrated(self, mock_load: MagicMock, mock_save: MagicMock) -> None:
+        """A quote tweet populates quoted_tweet with the referenced tweet's data."""
+        client = TwitterClient.__new__(TwitterClient)
+        client._client = MagicMock()
+
+        quoted_media = _make_tweepy_media(
+            media_key="mk_q1",
+            url="https://pbs.twimg.com/media/quoted.jpg",
+            media_type="photo",
+        )
+        quoted_obj = SimpleNamespace(
+            id=999,
+            text="3 goals for @SJEarthquakes!",
+            attachments={"media_keys": ["mk_q1"]},
+            entities={"urls": []},
+        )
+        main_tweet = _make_tweepy_tweet(
+            tweet_id=1000,
+            text="bringing home https://t.co/abc",
+            entities={"urls": [{"url": "https://t.co/abc", "expanded_url": "https://twitter.com/MLS/status/999", "display_url": "twitter.com/MLS/status/999"}]},
+            referenced_tweets=[SimpleNamespace(id=999, type="quoted")],
+        )
+
+        client._client.get_users_tweets.return_value = SimpleNamespace(
+            data=[main_tweet],
+            includes={"media": [quoted_media], "tweets": [quoted_obj]},
+        )
+
+        tweets = client.fetch_recent_tweets()
+
+        assert len(tweets) == 1
+        qt = tweets[0].quoted_tweet
+        assert qt is not None
+        assert qt.id == "999"
+        assert qt.text == "3 goals for @SJEarthquakes!"
+        assert len(qt.media) == 1
+        assert qt.media[0].url == "https://pbs.twimg.com/media/quoted.jpg"
+        assert qt.media[0].type == "photo"
+
+    @patch("bot.twitter_client.save_twitter_user_id")
+    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
+    def test_non_quote_tweet_has_no_quoted_tweet(self, mock_load: MagicMock, mock_save: MagicMock) -> None:
+        """A regular tweet with no referenced_tweets has quoted_tweet == None."""
+        client = TwitterClient.__new__(TwitterClient)
+        client._client = MagicMock()
+
+        tweet_obj = _make_tweepy_tweet(tweet_id=100, text="standalone")
+
+        client._client.get_users_tweets.return_value = SimpleNamespace(
+            data=[tweet_obj], includes=None
+        )
+
+        tweets = client.fetch_recent_tweets()
+
+        assert tweets[0].quoted_tweet is None
+
+    @patch("bot.twitter_client.save_twitter_user_id")
+    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
+    def test_quoted_tweet_missing_from_includes(self, mock_load: MagicMock, mock_save: MagicMock) -> None:
+        """If the referenced tweet object is absent from includes, quoted_tweet is None."""
+        client = TwitterClient.__new__(TwitterClient)
+        client._client = MagicMock()
+
+        main_tweet = _make_tweepy_tweet(
+            tweet_id=1001,
+            text="quoting https://t.co/xyz",
+            referenced_tweets=[SimpleNamespace(id=888, type="quoted")],
+        )
+
+        client._client.get_users_tweets.return_value = SimpleNamespace(
+            data=[main_tweet],
+            includes={"tweets": []},  # referenced tweet not present
+        )
+
+        tweets = client.fetch_recent_tweets()
+
+        assert tweets[0].quoted_tweet is None

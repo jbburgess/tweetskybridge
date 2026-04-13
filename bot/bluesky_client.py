@@ -179,6 +179,10 @@ class BlueskyClient:
         if any(m.type == "photo" and m.url for m in tweet.media):
             return None
 
+        # For quote tweets, build the card directly from API data
+        if tweet.quoted_tweet is not None:
+            return self._build_quote_embed_card(tweet)
+
         # Find the first real URL (skip /photo/ media links but keep /video/
         # links so they can serve as a fallback card).
         target_url = ""
@@ -214,6 +218,57 @@ class BlueskyClient:
                 uri=target_url,
                 title=og.get("title", ""),
                 description=og.get("description", ""),
+                thumb=thumb,
+            )
+        )
+
+    def _build_quote_embed_card(self, tweet: Tweet) -> models.AppBskyEmbedExternal.Main | None:
+        """Build an external link card for a quoted tweet using Twitter API data.
+
+        Bypasses OG metadata scraping (which Twitter blocks) by using the
+        quoted tweet text and media already fetched from the API.
+        """
+        quoted = tweet.quoted_tweet
+        if quoted is None:
+            return None
+
+        # Find the twitter.com / x.com status URL for the quoted tweet
+        target_url = ""
+        for u in tweet.urls:
+            expanded = u.get("expanded_url", "")
+            if f"/status/{quoted.id}" in expanded and (
+                expanded.startswith("https://twitter.com/") or
+                expanded.startswith("https://x.com/")
+            ):
+                target_url = expanded
+                break
+
+        if not target_url:
+            return None
+
+        # Parse "@username" from URL: https://twitter.com/username/status/123 → "@username"
+        try:
+            title = "@" + target_url.split("/")[3]
+        except IndexError:
+            title = target_url
+
+        description = quoted.text
+
+        # Use the quoted tweet's first photo as the card thumbnail
+        thumb = None
+        photos = [m for m in quoted.media if m.type == "photo" and m.url]
+        if photos:
+            try:
+                img_bytes = download_image(photos[0].url)
+                thumb = self._client.upload_blob(img_bytes).blob
+            except Exception:
+                log.warning("Failed to download quoted tweet thumbnail for %s", target_url)
+
+        return models.AppBskyEmbedExternal.Main(
+            external=models.AppBskyEmbedExternal.External(
+                uri=target_url,
+                title=title,
+                description=description,
                 thumb=thumb,
             )
         )

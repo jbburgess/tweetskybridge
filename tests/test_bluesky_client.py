@@ -251,6 +251,95 @@ class TestBuildLinkCard:
         assert card.external.thumb is None
 
 
+class TestBuildQuoteEmbedCard:
+    def test_builds_card_with_username_and_description(self) -> None:
+        client = BlueskyClient()
+        quoted = Tweet(
+            id="999",
+            text="3 goals for @SJEarthquakes!",
+        )
+        tweet = Tweet(
+            id="1000",
+            text="bringing home",
+            urls=[{
+                "url": "https://t.co/abc",
+                "expanded_url": "https://twitter.com/MLS/status/999",
+                "display_url": "twitter.com/MLS/status/999",
+            }],
+            quoted_tweet=quoted,
+        )
+
+        card = client._build_quote_embed_card(tweet)
+
+        assert card is not None
+        assert card.external.uri == "https://twitter.com/MLS/status/999"
+        assert card.external.title == "@MLS"
+        assert card.external.description == "3 goals for @SJEarthquakes!"
+        assert card.external.thumb is None
+
+    @patch("bot.bluesky_client.download_image", return_value=b"\xff\xd8fake-jpg")
+    def test_builds_card_with_thumbnail_from_quoted_media(self, mock_dl: MagicMock) -> None:
+        client = BlueskyClient()
+        blob_resp = SimpleNamespace(blob=_FAKE_BLOB)
+        client._client.upload_blob = MagicMock(return_value=blob_resp)
+
+        quoted = Tweet(
+            id="999",
+            text="Big win tonight!",
+            media=[MediaItem(url="https://pbs.twimg.com/media/quoted.jpg", type="photo")],
+        )
+        tweet = Tweet(
+            id="1000",
+            text="amazing",
+            urls=[{
+                "url": "https://t.co/abc",
+                "expanded_url": "https://twitter.com/MLS/status/999",
+                "display_url": "twitter.com/MLS/status/999",
+            }],
+            quoted_tweet=quoted,
+        )
+
+        card = client._build_quote_embed_card(tweet)
+
+        assert card is not None
+        assert card.external.thumb is not None
+        mock_dl.assert_called_once_with("https://pbs.twimg.com/media/quoted.jpg")
+
+    def test_returns_none_when_no_matching_url(self) -> None:
+        """If the quoted tweet's status URL isn't in tweet.urls, return None."""
+        client = BlueskyClient()
+        quoted = Tweet(id="999", text="something")
+        tweet = Tweet(
+            id="1000",
+            text="quoting",
+            urls=[],
+            quoted_tweet=quoted,
+        )
+
+        assert client._build_quote_embed_card(tweet) is None
+
+    def test_link_card_delegates_to_quote_embed_card(self) -> None:
+        """_build_link_card routes to _build_quote_embed_card for quote tweets."""
+        client = BlueskyClient()
+        quoted = Tweet(id="999", text="quoted text")
+        tweet = Tweet(
+            id="1000",
+            text="quoting",
+            urls=[{
+                "url": "https://t.co/abc",
+                "expanded_url": "https://twitter.com/MLS/status/999",
+                "display_url": "twitter.com/MLS/status/999",
+            }],
+            quoted_tweet=quoted,
+        )
+
+        card = client._build_link_card(tweet)
+
+        assert card is not None
+        assert card.external.uri == "https://twitter.com/MLS/status/999"
+        assert card.external.title == "@MLS"
+
+
 class TestPost:
     @patch("bot.bluesky_client.download_image", return_value=b"\xff\xd8jpg")
     @patch.object(BlueskyClient, "login")

@@ -13,10 +13,10 @@ pytestmark = pytest.mark.unit
 
 @pytest.fixture(autouse=True)
 def _set_config() -> None:
-    config.HTTP_TIMEOUT = 5
-    config.MAX_IMAGE_BYTES = 1024
-    config.VIDEO_TIMEOUT = 10
-    config.MAX_VIDEO_BYTES = 2048
+    config.cfg.HTTP_TIMEOUT = 5
+    config.cfg.MAX_IMAGE_BYTES = 1024
+    config.cfg.VIDEO_TIMEOUT = 10
+    config.cfg.MAX_VIDEO_BYTES = 2048
 
 
 class TestDownloadImage:
@@ -178,6 +178,24 @@ class TestSelectBestVariant:
         assert best is not None
         assert best["url"] == "https://v/gif.mp4"
 
+    def test_no_mp4_returns_none(self) -> None:
+        variants = [
+            {"content_type": "application/x-mpegURL", "url": "https://v/playlist.m3u8"},
+        ]
+        assert select_best_variant(variants) is None
+
+    def test_empty_variants_returns_none(self) -> None:
+        assert select_best_variant([]) is None
+
+    def test_missing_bit_rate_treated_as_zero(self) -> None:
+        variants = [
+            {"content_type": "video/mp4", "url": "https://v/a.mp4"},
+            {"content_type": "video/mp4", "bit_rate": 500000, "url": "https://v/b.mp4"},
+        ]
+        best = select_best_variant(variants)
+        assert best is not None
+        assert best["url"] == "https://v/b.mp4"
+
 
 class TestGetImageDimensions:
     def test_returns_correct_dimensions(self) -> None:
@@ -282,21 +300,3 @@ class TestGetVideoDimensions:
 
         assert w == 0
         assert h == 0
-
-    def test_no_mp4_returns_none(self) -> None:
-        variants = [
-            {"content_type": "application/x-mpegURL", "url": "https://v/playlist.m3u8"},
-        ]
-        assert select_best_variant(variants) is None
-
-    def test_empty_variants_returns_none(self) -> None:
-        assert select_best_variant([]) is None
-
-    def test_missing_bit_rate_treated_as_zero(self) -> None:
-        variants = [
-            {"content_type": "video/mp4", "url": "https://v/a.mp4"},
-            {"content_type": "video/mp4", "bit_rate": 500000, "url": "https://v/b.mp4"},
-        ]
-        best = select_best_variant(variants)
-        assert best is not None
-        assert best["url"] == "https://v/b.mp4"

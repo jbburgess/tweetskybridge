@@ -1,15 +1,25 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 
 from atproto import Client, models
 
 from bot import config
 from bot.media import download_image, download_video, fetch_og_metadata, get_image_dimensions, get_video_dimensions, select_best_variant
-from bot.text import build_text_builder, resolve_urls, truncate
-from bot.twitter_client import Tweet
+from bot.models import MediaItem, Tweet
+from bot.text import build_text_builder, resolve_urls, split_text_for_thread
+from bot.urls import is_twitter_photo_url, is_twitter_status_url
 
 log = logging.getLogger(__name__)
+
+
+@dataclass
+class BlueskyPostRef:
+    """URI + CID of a posted Bluesky record, used to chain reply threads."""
+
+    uri: str
+    cid: str
 
 
 class BlueskyClient:
@@ -21,18 +31,18 @@ class BlueskyClient:
 
     def login(self) -> None:
         """Authenticate using a saved session string or handle/password."""
-        if config.BLUESKY_SESSION:
+        if config.cfg.BLUESKY_SESSION:
             try:
-                self._client.login(session_string=config.BLUESKY_SESSION)
+                self._client.login(session_string=config.cfg.BLUESKY_SESSION)
                 self._logged_in = True
                 log.info("Logged in to Bluesky via session string")
                 return
             except Exception:
                 log.warning("Session string login failed, falling back to password")
 
-        self._client.login(config.BLUESKY_HANDLE, config.BLUESKY_PASSWORD)
+        self._client.login(config.cfg.BLUESKY_HANDLE, config.cfg.BLUESKY_PASSWORD)
         self._logged_in = True
-        log.info("Logged in to Bluesky as %s", config.BLUESKY_HANDLE)
+        log.info("Logged in to Bluesky as %s", config.cfg.BLUESKY_HANDLE)
 
     def export_session(self) -> str:
         """Export the current session string for reuse on a future run."""
@@ -42,38 +52,144 @@ class BlueskyClient:
     # Posting
     # ------------------------------------------------------------------
 
-    def post(self, tweet: Tweet) -> None:
-        """Create a Bluesky post from a Tweet, including media and link cards."""
+    @staticmethod
+    def _build_reply_ref(
+        parent_ref: BlueskyPostRef | None,
+        root_ref: BlueskyPostRef | None = None,
+    ) -> models.AppBskyFeedPost.ReplyRef | None:
+        """Construct a Bluesky reply ref, or ``None`` for top-level posts."""
+        if parent_ref is None:
+            return None
+        _parent = models.ComAtprotoRepoStrongRef.Main(uri=parent_ref.uri, cid=parent_ref.cid)
+        _root = models.ComAtprotoRepoStrongRef.Main(
+            uri=(root_ref or parent_ref).uri,
+            cid=(root_ref or parent_ref).cid,
+        )
+        return models.AppBskyFeedPost.ReplyRef(parent=_parent, root=_root)
+
+    def post(
+        self,
+        tweet: Tweet,
+        *,
+        parent_ref: BlueskyPostRef | None = None,
+        root_ref: BlueskyPostRef | None = None,
+    ) -> BlueskyPostRef:
+        """Create a Bluesky post (or reply thread) from a Tweet.
+
+        Long tweets are split into a chain of reply posts with ``(k/n)``
+        suffixes.  Media is attached to the first post only.  Returns the
+        URI+CID of the *last* posted record so callers can chain downstream
+        replies.
+        """
         if not self._logged_in:
             self.login()
 
         text = resolve_urls(tweet)
-        text = truncate(text)
-        tb = build_text_builder(text, tweet)
+        parts = split_text_for_thread(text)
+        n = len(parts)
+        mixed = self._has_mixed_media(tweet)
 
-        # Video/GIF takes priority — send_video handles upload + post in one call
-        video_data, video_alt, video_w, video_h = self._prepare_video(tweet)
-        if video_data is not None:
-            try:
-                video_ar = (
-                    models.AppBskyEmbedDefs.AspectRatio(width=video_w, height=video_h)
-                    if video_w and video_h else None
-                )
-                self._client.send_video(text=tb, video=video_data, video_alt=video_alt, video_aspect_ratio=video_ar)
-                log.info("Posted video to Bluesky: %s", text[:60])
-                return
-            except Exception:
-                log.warning("Bluesky rejected video for tweet %s, falling back to link card", tweet.id)
+        first_ref: BlueskyPostRef | None = None
+        prev_ref: BlueskyPostRef | None = None
+        for k, part_text in enumerate(parts):
+            tb = build_text_builder(part_text, tweet)
 
-        # Determine embed (images take priority over link card)
-        embed = self._build_image_embed(tweet) or self._build_link_card(tweet)
+            # First chunk continues any caller-supplied thread; subsequent
+            # chunks reply to the previous chunk within this split while
+            # preserving any existing thread root. For standalone split
+            # posts, fall back to the first chunk as the root.
+            if k == 0:
+                part_parent = parent_ref
+                part_root = root_ref
+            else:
+                part_parent = prev_ref
+                part_root = root_ref or first_ref
 
-        self._client.send_post(tb, embed=embed)
-        log.info("Posted to Bluesky: %s", text[:60])
+            reply = self._build_reply_ref(part_parent, part_root)
+
+            # Attach media to the first chunk only.
+            if k == 0:
+                # For mixed-media tweets, prioritise the image gallery on the
+                # main post and defer videos to threaded replies below.
+                if mixed:
+                    embed = self._build_image_embed(tweet) or self._build_link_card(tweet)
+                else:
+                    # Video/GIF takes priority — send_video handles upload + post
+                    video_data, video_alt, video_w, video_h = self._prepare_video(tweet)
+                    if video_data is not None:
+                        try:
+                            video_ar = (
+                                models.AppBskyEmbedDefs.AspectRatio(width=video_w, height=video_h)
+                                if video_w and video_h else None
+                            )
+                            result = self._client.send_video(
+                                text=tb, video=video_data, video_alt=video_alt,
+                                video_aspect_ratio=video_ar, reply_to=reply,
+                            )
+                            label = f" part 1/{n}" if n > 1 else ""
+                            log.info("Posted%s (video) to Bluesky: %s", label, part_text[:60])
+                            ref = BlueskyPostRef(uri=str(result.uri), cid=str(result.cid))
+                            first_ref = ref
+                            prev_ref = ref
+                            continue
+                        except Exception:
+                            log.warning("Bluesky rejected video for tweet %s, falling back to link card", tweet.id)
+
+                    embed = self._build_image_embed(tweet) or self._build_link_card(tweet)
+            else:
+                embed = None
+
+            result = self._client.send_post(tb, embed=embed, reply_to=reply)
+            label = f" part {k + 1}/{n}" if n > 1 else ""
+            log.info("Posted%s to Bluesky: %s", label, part_text[:60])
+            ref = BlueskyPostRef(uri=str(result.uri), cid=str(result.cid))
+            if first_ref is None:
+                first_ref = ref
+            prev_ref = ref
+
+        assert prev_ref is not None  # parts is always non-empty
+
+        # For mixed-media tweets, post each video/GIF as a threaded reply.
+        if mixed:
+            video_items = [
+                m for m in tweet.media
+                if m.type in ("video", "animated_gif") and m.variants
+            ]
+            for item in video_items:
+                video_data, video_alt, video_w, video_h = self._prepare_single_video(item)
+                if video_data is None:
+                    continue
+                try:
+                    video_ar = (
+                        models.AppBskyEmbedDefs.AspectRatio(width=video_w, height=video_h)
+                        if video_w and video_h else None
+                    )
+                    reply = self._build_reply_ref(prev_ref, first_ref)
+                    result = self._client.send_video(
+                        text="", video=video_data, video_alt=video_alt,
+                        video_aspect_ratio=video_ar, reply_to=reply,
+                    )
+                    log.info("Posted video reply to Bluesky for tweet %s", tweet.id)
+                    ref = BlueskyPostRef(uri=str(result.uri), cid=str(result.cid))
+                    prev_ref = ref
+                except Exception:
+                    log.warning("Failed to post video reply for tweet %s, skipping", tweet.id)
+
+        return prev_ref
 
     # ------------------------------------------------------------------
     # Embeds
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _has_mixed_media(tweet: Tweet) -> bool:
+        """Return ``True`` if *tweet* contains both photos and videos/GIFs."""
+        has_photo = any(m.type == "photo" and m.url for m in tweet.media)
+        has_video = any(
+            m.type in ("video", "animated_gif") and m.variants
+            for m in tweet.media
+        )
+        return has_photo and has_video
 
     def _build_image_embed(self, tweet: Tweet) -> models.AppBskyEmbedImages.Main | None:
         """Download tweet images and build an image embed (up to 4)."""
@@ -119,7 +235,15 @@ class BlueskyClient:
         if not videos:
             return None, "", 0, 0
 
-        item = videos[0]  # Bluesky supports one video per post
+        return self._prepare_single_video(videos[0])
+
+    @staticmethod
+    def _prepare_single_video(item: "MediaItem") -> tuple[bytes | None, str, int, int]:
+        """Download a single video/GIF *item*.
+
+        Returns ``(video_bytes, alt_text, width, height)`` on success or
+        ``(None, "", 0, 0)`` on failure.
+        """
         variant = select_best_variant(item.variants)
         if not variant:
             log.warning("No MP4 variant found for video media")
@@ -146,6 +270,10 @@ class BlueskyClient:
         if any(m.type == "photo" and m.url for m in tweet.media):
             return None
 
+        # For quote tweets, build the card directly from API data
+        if tweet.quoted_tweet is not None:
+            return self._build_quote_embed_card(tweet)
+
         # Find the first real URL (skip /photo/ media links but keep /video/
         # links so they can serve as a fallback card).
         target_url = ""
@@ -153,9 +281,7 @@ class BlueskyClient:
             expanded = u.get("expanded_url", "")
             if not expanded:
                 continue
-            if ("/photo/" in expanded and
-                    (expanded.startswith("https://twitter.com/") or
-                     expanded.startswith("https://x.com/"))):
+            if is_twitter_photo_url(expanded):
                 continue
             target_url = expanded
             break
@@ -181,6 +307,54 @@ class BlueskyClient:
                 uri=target_url,
                 title=og.get("title", ""),
                 description=og.get("description", ""),
+                thumb=thumb,
+            )
+        )
+
+    def _build_quote_embed_card(self, tweet: Tweet) -> models.AppBskyEmbedExternal.Main | None:
+        """Build an external link card for a quoted tweet using Twitter API data.
+
+        Bypasses OG metadata scraping (which Twitter blocks) by using the
+        quoted tweet text and media already fetched from the API.
+        """
+        quoted = tweet.quoted_tweet
+        if quoted is None:
+            return None
+
+        # Find the twitter.com / x.com status URL for the quoted tweet
+        target_url = ""
+        for u in tweet.urls:
+            expanded = u.get("expanded_url", "")
+            if is_twitter_status_url(expanded, quoted.id):
+                target_url = expanded
+                break
+
+        if not target_url:
+            return None
+
+        # Parse "@username" from URL: https://twitter.com/username/status/123 → "@username"
+        try:
+            title = "@" + target_url.split("/")[3]
+        except IndexError:
+            title = target_url
+
+        description = quoted.text
+
+        # Use the quoted tweet's first photo as the card thumbnail
+        thumb = None
+        photos = [m for m in quoted.media if m.type == "photo" and m.url]
+        if photos:
+            try:
+                img_bytes = download_image(photos[0].url)
+                thumb = self._client.upload_blob(img_bytes).blob
+            except Exception:
+                log.warning("Failed to download quoted tweet thumbnail for %s", target_url)
+
+        return models.AppBskyEmbedExternal.Main(
+            external=models.AppBskyEmbedExternal.External(
+                uri=target_url,
+                title=title,
+                description=description,
                 thumb=thumb,
             )
         )

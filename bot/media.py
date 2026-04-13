@@ -12,27 +12,42 @@ from bot import config
 log = logging.getLogger(__name__)
 
 
+def _download(url: str, *, timeout: int, max_bytes: int, chunk_size: int, label: str) -> bytes:
+    """Stream-download *url* with size and timeout limits.
+
+    Raises ``ValueError`` if the response exceeds *max_bytes*.
+    Raises ``requests.HTTPError`` on non-2xx responses.
+    """
+    resp = requests.get(url, timeout=timeout, stream=True)
+    resp.raise_for_status()
+
+    chunks: list[bytes] = []
+    size = 0
+    for chunk in resp.iter_content(chunk_size=chunk_size):
+        size += len(chunk)
+        if size > max_bytes:
+            raise ValueError(
+                f"{label} at {url} exceeds {max_bytes} byte limit"
+            )
+        chunks.append(chunk)
+
+    log.debug("Downloaded %s %d bytes from %s", label, size, url)
+    return b"".join(chunks)
+
+
 def download_image(url: str) -> bytes:
     """Download an image from *url* and return the raw bytes.
 
     Raises ``ValueError`` if the response exceeds MAX_IMAGE_BYTES.
     Raises ``requests.HTTPError`` on non-2xx responses.
     """
-    resp = requests.get(url, timeout=config.HTTP_TIMEOUT, stream=True)
-    resp.raise_for_status()
-
-    chunks: list[bytes] = []
-    size = 0
-    for chunk in resp.iter_content(chunk_size=64 * 1024):
-        size += len(chunk)
-        if size > config.MAX_IMAGE_BYTES:
-            raise ValueError(
-                f"Image at {url} exceeds {config.MAX_IMAGE_BYTES} byte limit"
-            )
-        chunks.append(chunk)
-
-    log.debug("Downloaded %d bytes from %s", size, url)
-    return b"".join(chunks)
+    return _download(
+        url,
+        timeout=config.cfg.HTTP_TIMEOUT,
+        max_bytes=config.cfg.MAX_IMAGE_BYTES,
+        chunk_size=64 * 1024,
+        label="Image",
+    )
 
 
 def download_video(url: str) -> bytes:
@@ -42,21 +57,13 @@ def download_video(url: str) -> bytes:
     Raises ``ValueError`` if the response exceeds MAX_VIDEO_BYTES.
     Raises ``requests.HTTPError`` on non-2xx responses.
     """
-    resp = requests.get(url, timeout=config.VIDEO_TIMEOUT, stream=True)
-    resp.raise_for_status()
-
-    chunks: list[bytes] = []
-    size = 0
-    for chunk in resp.iter_content(chunk_size=256 * 1024):
-        size += len(chunk)
-        if size > config.MAX_VIDEO_BYTES:
-            raise ValueError(
-                f"Video at {url} exceeds {config.MAX_VIDEO_BYTES} byte limit"
-            )
-        chunks.append(chunk)
-
-    log.debug("Downloaded video %d bytes from %s", size, url)
-    return b"".join(chunks)
+    return _download(
+        url,
+        timeout=config.cfg.VIDEO_TIMEOUT,
+        max_bytes=config.cfg.MAX_VIDEO_BYTES,
+        chunk_size=256 * 1024,
+        label="Video",
+    )
 
 
 def get_video_dimensions(data: bytes) -> tuple[int, int]:
@@ -161,7 +168,7 @@ def fetch_og_metadata(url: str) -> dict[str, str]:
     try:
         resp = requests.get(
             url,
-            timeout=config.HTTP_TIMEOUT,
+            timeout=config.cfg.HTTP_TIMEOUT,
             headers={"User-Agent": "bskybot/1.0 (link-card preview)"},
         )
         resp.raise_for_status()

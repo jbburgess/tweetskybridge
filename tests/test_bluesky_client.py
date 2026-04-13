@@ -372,8 +372,6 @@ class TestPost:
 
     @patch.object(BlueskyClient, "login")
     def test_reply_passes_reply_to_send_post(self, mock_login: MagicMock) -> None:
-        from atproto import models as bsky_models
-
         client = BlueskyClient()
         client._logged_in = True
         client._client.send_post = MagicMock(

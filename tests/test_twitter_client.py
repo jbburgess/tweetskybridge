@@ -360,6 +360,7 @@ class TestFetchRecentTweets:
 
         assert tweets[0].reply_to_tweet_id is None
         assert tweets[0].conversation_id == "100"
+        assert tweets[0].quoted_tweet is None
 
     @patch("bot.twitter_client.save_twitter_user_id")
     @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
@@ -460,23 +461,6 @@ class TestFetchRecentTweets:
         assert len(qt.media) == 1
         assert qt.media[0].url == "https://pbs.twimg.com/media/quoted.jpg"
         assert qt.media[0].type == "photo"
-
-    @patch("bot.twitter_client.save_twitter_user_id")
-    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
-    def test_non_quote_tweet_has_no_quoted_tweet(self, mock_load: MagicMock, mock_save: MagicMock) -> None:
-        """A regular tweet with no referenced_tweets has quoted_tweet == None."""
-        client = TwitterClient.__new__(TwitterClient)
-        client._client = MagicMock()
-
-        tweet_obj = _make_tweepy_tweet(tweet_id=100, text="standalone")
-
-        client._client.get_users_tweets.return_value = SimpleNamespace(
-            data=[tweet_obj], includes=None
-        )
-
-        tweets = client.fetch_recent_tweets()
-
-        assert tweets[0].quoted_tweet is None
 
     @patch("bot.twitter_client.save_twitter_user_id")
     @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")

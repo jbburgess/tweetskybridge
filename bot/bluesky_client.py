@@ -7,8 +7,9 @@ from atproto import Client, models
 
 from bot import config
 from bot.media import download_image, download_video, fetch_og_metadata, get_image_dimensions, get_video_dimensions, select_best_variant
+from bot.models import Tweet
 from bot.text import build_text_builder, resolve_urls, split_text_for_thread
-from bot.twitter_client import Tweet
+from bot.urls import is_twitter_photo_url, is_twitter_status_url
 
 log = logging.getLogger(__name__)
 
@@ -30,18 +31,18 @@ class BlueskyClient:
 
     def login(self) -> None:
         """Authenticate using a saved session string or handle/password."""
-        if config.BLUESKY_SESSION:
+        if config.cfg.BLUESKY_SESSION:
             try:
-                self._client.login(session_string=config.BLUESKY_SESSION)
+                self._client.login(session_string=config.cfg.BLUESKY_SESSION)
                 self._logged_in = True
                 log.info("Logged in to Bluesky via session string")
                 return
             except Exception:
                 log.warning("Session string login failed, falling back to password")
 
-        self._client.login(config.BLUESKY_HANDLE, config.BLUESKY_PASSWORD)
+        self._client.login(config.cfg.BLUESKY_HANDLE, config.cfg.BLUESKY_PASSWORD)
         self._logged_in = True
-        log.info("Logged in to Bluesky as %s", config.BLUESKY_HANDLE)
+        log.info("Logged in to Bluesky as %s", config.cfg.BLUESKY_HANDLE)
 
     def export_session(self) -> str:
         """Export the current session string for reuse on a future run."""
@@ -227,9 +228,7 @@ class BlueskyClient:
             expanded = u.get("expanded_url", "")
             if not expanded:
                 continue
-            if ("/photo/" in expanded and
-                    (expanded.startswith("https://twitter.com/") or
-                     expanded.startswith("https://x.com/"))):
+            if is_twitter_photo_url(expanded):
                 continue
             target_url = expanded
             break
@@ -273,10 +272,7 @@ class BlueskyClient:
         target_url = ""
         for u in tweet.urls:
             expanded = u.get("expanded_url", "")
-            if f"/status/{quoted.id}" in expanded and (
-                expanded.startswith("https://twitter.com/") or
-                expanded.startswith("https://x.com/")
-            ):
+            if is_twitter_status_url(expanded, quoted.id):
                 target_url = expanded
                 break
 

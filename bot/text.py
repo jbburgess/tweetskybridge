@@ -7,7 +7,8 @@ import unicodedata
 from atproto import client_utils
 
 from bot import config
-from bot.twitter_client import Tweet
+from bot.models import Tweet
+from bot.urls import is_twitter_media_url, is_twitter_photo_url, is_twitter_status_url
 
 log = logging.getLogger(__name__)
 
@@ -50,18 +51,12 @@ def resolve_urls(tweet: Tweet) -> str:
 
         # If this URL entity points to the tweet's own media, remove it rather
         # than expanding, since the media will be attached as an embed.
-        if expanded.startswith("https://twitter.com/") and ("/photo/" in expanded or "/video/" in expanded):
-            text = text.replace(short, "").strip()
-            continue
-        if expanded.startswith("https://x.com/") and ("/photo/" in expanded or "/video/" in expanded):
+        if is_twitter_media_url(expanded):
             text = text.replace(short, "").strip()
             continue
 
         # Strip the quoted tweet's status URL — the link card embed handles it
-        if tweet.quoted_tweet is not None and f"/status/{tweet.quoted_tweet.id}" in expanded and (
-            expanded.startswith("https://twitter.com/") or
-            expanded.startswith("https://x.com/")
-        ):
+        if tweet.quoted_tweet is not None and is_twitter_status_url(expanded, tweet.quoted_tweet.id):
             text = text.replace(short, "").strip()
             continue
 
@@ -70,7 +65,7 @@ def resolve_urls(tweet: Tweet) -> str:
     return html.unescape(text.strip())
 
 
-def truncate(text: str, limit: int = config.BLUESKY_GRAPHEME_LIMIT) -> str:
+def truncate(text: str, limit: int = config.cfg.BLUESKY_GRAPHEME_LIMIT) -> str:
     """Truncate *text* to *limit* graphemes, appending '…' if shortened."""
     if _grapheme_len(text) <= limit:
         return text
@@ -146,7 +141,7 @@ def _split_into_chunks(text: str, max_graphemes: int) -> list[str]:
 
 
 def split_text_for_thread(
-    text: str, limit: int = config.BLUESKY_GRAPHEME_LIMIT
+    text: str, limit: int = config.cfg.BLUESKY_GRAPHEME_LIMIT
 ) -> list[str]:
     """Split *text* into Bluesky-sized chunks for a reply thread.
 
@@ -189,9 +184,7 @@ def build_text_builder(text: str, tweet: Tweet) -> client_utils.TextBuilder:
             continue
 
         # Skip media-only URLs that were already stripped
-        if ("/photo/" in expanded and
-                (expanded.startswith("https://twitter.com/") or
-                 expanded.startswith("https://x.com/"))):
+        if is_twitter_photo_url(expanded):
             continue
 
         idx = remaining.index(expanded)

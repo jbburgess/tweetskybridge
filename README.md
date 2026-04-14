@@ -153,7 +153,7 @@ For more reliable scheduling at short intervals, a local cron job can be used to
 
 **Prerequisites:**
 
-- `gh` CLI installed and authenticated (`gh auth login`) with `actions:write` scope
+- `gh` CLI installed and authenticated (`gh auth login`) with permission to dispatch workflows — use the `workflow` scope for a classic PAT, or **Actions: Read and write** for a fine-grained PAT
 
 **Setup (WSL / Linux / macOS):**
 
@@ -162,10 +162,10 @@ chmod +x scripts/trigger-mirror.sh
 crontab -e
 ```
 
-Add the following line (runs every 10 minutes at `:00, :10, …, :50` during hours 0–5 and 16–23 UTC) or edit the schedule as desired:
+Add the following line to schedule runs every 10 minutes during hours 7–21 (7:00 to 21:50) local time or edit the schedule as desired:
 
 ```bash
-*/10 0-5,16-23 * * * /absolute/path/to/scripts/trigger-mirror.sh >> ~/mirror-trigger.log 2>&1
+*/10 7-21 * * * /absolute/path/to/scripts/trigger-mirror.sh >> ~/mirror-trigger.log 2>&1
 ```
 
 ---

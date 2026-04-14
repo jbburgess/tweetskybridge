@@ -16,7 +16,8 @@ Automatically mirror tweets from a Twitter (X) account to Bluesky — including 
 - Tracks previously reposted tweet IDs in a JSON state file (capped at 100 entries)
 - Caches the Twitter numeric user ID to avoid redundant API lookups
 - Supports Bluesky session-string reuse to reduce password-based logins
-- Runs on a 5-minute cron schedule via GitHub Actions (free tier)
+- Runs via GitHub Actions, triggered either by schedule or by `workflow_dispatch`
+  - Optional: Use `scripts/trigger-mirror.sh` to trigger from a local cron job for more reliable scheduling
 
 ---
 
@@ -34,6 +35,8 @@ Automatically mirror tweets from a Twitter (X) account to Bluesky — including 
 │   └── text.py                      # URL resolution, grapheme-aware truncation, TextBuilder
 ├── requirements.txt                 # Pinned Python dependencies
 ├── seen_ids.json                    # State file (auto-managed, committed by CI)
+├── scripts/
+│   └── trigger-mirror.sh            # Optional: Local cron script to dispatch the workflow more reliably than GitHub's schedule event
 └── .github/
     └── workflows/
         ├── ci.yml                   # Runs linters and unit tests on push and PR
@@ -137,14 +140,33 @@ Sample output:
 
 ## GitHub Actions Deployment
 
-The workflow at `.github/workflows/repost.yml`:
+The workflow at `.github/workflows/run-mirror.yml`:
 
-- Runs every **5 minutes** (`*/5 * * * *`) and supports manual dispatch
-- Uses a **concurrency group** to prevent overlapping runs
+- Triggered via `workflow_dispatch` (manual or automated) or `schedule` (automatic)
 - Only commits `seen_ids.json` back to the repo **when it actually changes**
 - Requires "Read and write repository contents" under **Settings > Actions > General**
 
-No external servers or paid services required. Everything runs on GitHub's free tier.
+### Local cron trigger
+
+GitHub's built-in `schedule` event trigger is best-effort and *will* delay and drop runs.
+For more reliable scheduling at short intervals, a local cron job can be used to execute `scripts/trigger-mirror.sh`, which dispatches the workflow via the `gh` CLI.
+
+**Prerequisites:**
+
+- `gh` CLI installed and authenticated (`gh auth login`) with permission to dispatch workflows — use the `workflow` scope for a classic PAT, or **Actions: Read and write** for a fine-grained PAT
+
+**Setup (WSL / Linux / macOS):**
+
+```bash
+chmod +x scripts/trigger-mirror.sh
+crontab -e
+```
+
+Add the following line to schedule runs every 10 minutes during hours 7–21 (7:00 to 21:50) local time or edit the schedule as desired:
+
+```bash
+*/10 7-21 * * * /absolute/path/to/scripts/trigger-mirror.sh >> ~/mirror-trigger.log 2>&1
+```
 
 ---
 

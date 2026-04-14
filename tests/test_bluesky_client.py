@@ -1223,6 +1223,90 @@ class TestMixedMediaPost:
         client._client.send_post.assert_not_called()
         assert result.uri == "at://did/video/1"
 
+    @patch("bot.bluesky_client.download_video", return_value=b"\x00video")
+    @patch("bot.bluesky_client.select_best_variant", return_value={
+        "content_type": "video/mp4",
+        "url": "https://video.twimg.com/v/hi.mp4",
+    })
+    @patch.object(BlueskyClient, "login")
+    def test_multi_video_only_posts_remaining_as_replies(
+        self, mock_login: MagicMock, mock_variant: MagicMock, mock_dl_vid: MagicMock,
+    ) -> None:
+        """A tweet with multiple videos (no photos) posts the first on the main
+        post and the rest as threaded replies."""
+        client = BlueskyClient()
+        client._logged_in = True
+        client._client.send_post = MagicMock()
+
+        video_count = 0
+
+        def fake_send_video(*, text, video, video_alt, video_aspect_ratio=None, reply_to=None):
+            nonlocal video_count
+            video_count += 1
+            return SimpleNamespace(uri=f"at://did/video/{video_count}", cid=f"vidcid{video_count}")
+
+        client._client.send_video = MagicMock(side_effect=fake_send_video)
+
+        tweet = Tweet(
+            id="1",
+            text="Four goal clips",
+            media=[
+                MediaItem(
+                    url="https://pbs.twimg.com/thumb1.jpg",
+                    type="video",
+                    alt_text="goal 1",
+                    variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/1.mp4"}],
+                ),
+                MediaItem(
+                    url="https://pbs.twimg.com/thumb2.jpg",
+                    type="video",
+                    alt_text="goal 2",
+                    variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/2.mp4"}],
+                ),
+                MediaItem(
+                    url="https://pbs.twimg.com/thumb3.jpg",
+                    type="video",
+                    alt_text="goal 3",
+                    variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/3.mp4"}],
+                ),
+                MediaItem(
+                    url="https://pbs.twimg.com/thumb4.jpg",
+                    type="video",
+                    alt_text="goal 4",
+                    variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/4.mp4"}],
+                ),
+            ],
+        )
+
+        result = client.post(tweet)
+
+        # First video on main post + 3 video replies = 4 send_video calls
+        assert client._client.send_video.call_count == 4
+        client._client.send_post.assert_not_called()
+
+        # Main post has no reply_to (standalone)
+        main_kwargs = client._client.send_video.call_args_list[0].kwargs
+        assert main_kwargs["reply_to"] is None
+
+        # Second video reply chains off the main post
+        second_kwargs = client._client.send_video.call_args_list[1].kwargs
+        assert second_kwargs["reply_to"].parent.uri == "at://did/video/1"
+        assert second_kwargs["reply_to"].root.uri == "at://did/video/1"
+        assert second_kwargs["text"] == ""
+
+        # Third video reply chains off the second
+        third_kwargs = client._client.send_video.call_args_list[2].kwargs
+        assert third_kwargs["reply_to"].parent.uri == "at://did/video/2"
+        assert third_kwargs["reply_to"].root.uri == "at://did/video/1"
+
+        # Fourth video reply chains off the third
+        fourth_kwargs = client._client.send_video.call_args_list[3].kwargs
+        assert fourth_kwargs["reply_to"].parent.uri == "at://did/video/3"
+        assert fourth_kwargs["reply_to"].root.uri == "at://did/video/1"
+
+        # Return value is the last video reply
+        assert result.uri == "at://did/video/4"
+
 
 class TestPrepareSingleVideo:
     @patch("bot.bluesky_client.download_video", return_value=b"\x00\x00video-bytes")

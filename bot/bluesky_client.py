@@ -91,6 +91,7 @@ class BlueskyClient:
 
         first_ref: BlueskyPostRef | None = None
         prev_ref: BlueskyPostRef | None = None
+        video_on_main = False
         for k, part_text in enumerate(parts):
             tb = build_text_builder(part_text, tweet)
 
@@ -131,6 +132,7 @@ class BlueskyClient:
                             ref = BlueskyPostRef(uri=str(result.uri), cid=str(result.cid))
                             first_ref = ref
                             prev_ref = ref
+                            video_on_main = True
                             continue
                         except Exception:
                             log.warning("Bluesky rejected video for tweet %s, falling back to link card", tweet.id)
@@ -149,13 +151,15 @@ class BlueskyClient:
 
         assert prev_ref is not None  # parts is always non-empty
 
-        # For mixed-media tweets, post each video/GIF as a threaded reply.
-        if mixed:
-            video_items = [
-                m for m in tweet.media
-                if m.type in ("video", "animated_gif") and m.variants
-            ]
-            for item in video_items:
+        # Post remaining videos as threaded replies.  For mixed-media tweets
+        # (images + videos) all videos are deferred; for multi-video tweets
+        # the first was already posted on the main post.
+        video_items = [
+            m for m in tweet.media
+            if m.type in ("video", "animated_gif") and m.variants
+        ]
+        remaining = video_items[1:] if video_on_main else video_items if mixed else []
+        for item in remaining:
                 video_data, video_alt, video_w, video_h = self._prepare_single_video(item)
                 if video_data is None:
                     continue

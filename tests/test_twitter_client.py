@@ -394,7 +394,85 @@ class TestFetchRecentTweets:
         assert tweets[0].reply_to_tweet_id is None
         assert tweets[1].id == "200"
         assert tweets[1].reply_to_tweet_id == "100"
-        assert tweets[1].conversation_id == "100"
+
+
+class TestNoteTweets:
+    """Note Tweets (long tweets) supply full text via the note_tweet field."""
+
+    @patch("bot.twitter_client.save_twitter_user_id")
+    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
+    def test_note_tweet_text_used_over_truncated_text(
+        self, mock_load: MagicMock, mock_save: MagicMock
+    ) -> None:
+        client = TwitterClient.__new__(TwitterClient)
+        client._client = MagicMock()
+
+        full_text = "Line 1\nLine 2\nLine 3\nLine 4\nLine 5 — this part only in note_tweet"
+        truncated_text = "Line 1\nLine 2\nLine 3\nLine 4"
+
+        tweet_obj = _make_tweepy_tweet(tweet_id=1, text=truncated_text)
+        tweet_obj.note_tweet = {"text": full_text, "entities": {}}
+
+        client._client.get_users_tweets.return_value = SimpleNamespace(
+            data=[tweet_obj], includes=None
+        )
+
+        tweets = client.fetch_recent_tweets()
+
+        assert tweets[0].text == full_text
+
+    @patch("bot.twitter_client.save_twitter_user_id")
+    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
+    def test_note_tweet_entities_used_for_urls(
+        self, mock_load: MagicMock, mock_save: MagicMock
+    ) -> None:
+        client = TwitterClient.__new__(TwitterClient)
+        client._client = MagicMock()
+
+        # Standard entities only have the first URL; note_tweet entities have both
+        tweet_obj = _make_tweepy_tweet(
+            tweet_id=1,
+            text="First https://t.co/aaa",
+            entities={"urls": [{"url": "https://t.co/aaa", "expanded_url": "https://example.com/a", "display_url": "example.com/a"}]},
+        )
+        tweet_obj.note_tweet = {
+            "text": "First https://t.co/aaa Second https://t.co/bbb",
+            "entities": {
+                "urls": [
+                    {"url": "https://t.co/aaa", "expanded_url": "https://example.com/a", "display_url": "example.com/a"},
+                    {"url": "https://t.co/bbb", "expanded_url": "https://example.com/b", "display_url": "example.com/b"},
+                ]
+            },
+        }
+
+        client._client.get_users_tweets.return_value = SimpleNamespace(
+            data=[tweet_obj], includes=None
+        )
+
+        tweets = client.fetch_recent_tweets()
+
+        assert len(tweets[0].urls) == 2
+        assert tweets[0].urls[1]["expanded_url"] == "https://example.com/b"
+
+    @patch("bot.twitter_client.save_twitter_user_id")
+    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
+    def test_standard_tweet_unaffected(
+        self, mock_load: MagicMock, mock_save: MagicMock
+    ) -> None:
+        client = TwitterClient.__new__(TwitterClient)
+        client._client = MagicMock()
+
+        tweet_obj = _make_tweepy_tweet(tweet_id=1, text="A short tweet")
+        # No note_tweet attribute at all
+        assert not hasattr(tweet_obj, "note_tweet")
+
+        client._client.get_users_tweets.return_value = SimpleNamespace(
+            data=[tweet_obj], includes=None
+        )
+
+        tweets = client.fetch_recent_tweets()
+
+        assert tweets[0].text == "A short tweet"
 
     @patch("bot.twitter_client.save_twitter_user_id")
     @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")

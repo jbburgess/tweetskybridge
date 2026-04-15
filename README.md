@@ -6,16 +6,16 @@ Automatically mirror tweets from a Twitter (X) account to Bluesky — including 
 
 ## Features
 
-- Fetches the latest tweets (excluding retweets and replies) via the Twitter API v2
+- Fetches the latest tweets (excluding retweets and replies to other accounts) via the Twitter API v2
 - Reposts each new tweet to Bluesky using the AT Protocol SDK
 - Downloads and re-uploads tweet images (up to 4 per post) with alt text preserved
 - Resolves t.co short URLs to their expanded form
-- Creates rich link-card embeds (`app.bsky.embed.external`) for tweets that contain URLs but no images
+- Creates rich link-card embeds (`app.bsky.embed.external`) for tweets that contain URLs but no media (only one embed allowed)
 - Applies clickable link facets to URLs in post text
-- Truncates posts that exceed Bluesky's 300-grapheme limit with an ellipsis
-- Tracks previously reposted tweet IDs in a JSON state file (capped at 100 entries)
-- Caches the Twitter numeric user ID to avoid redundant API lookups
-- Supports Bluesky session-string reuse to reduce password-based logins
+- For tweets longer than 300 graphemes, splits the text into a main post and follow-up replies to accommodate Bluesky's character limit
+- Tracks previously reposted tweet IDs in a JSON state file (capped at 100 rolling entries)
+- Caches the target Twitter account's numeric user ID to avoid redundant API lookups
+- Supports Bluesky session-string reuse to minimize app password logins
 - Runs via GitHub Actions, triggered either by schedule or by `workflow_dispatch`
   - Optional: Use `scripts/trigger-mirror.sh` to trigger from a local cron job for more reliable scheduling
 

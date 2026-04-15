@@ -43,7 +43,7 @@ class TwitterClient:
                 id=user_id,
                 max_results=max_results,
                 exclude=["retweets", "replies"],
-                tweet_fields=["created_at", "entities", "referenced_tweets", "in_reply_to_user_id", "conversation_id"],
+                tweet_fields=["created_at", "entities", "note_tweet", "referenced_tweets", "in_reply_to_user_id", "conversation_id"],
                 expansions=["attachments.media_keys", "referenced_tweets.id", "referenced_tweets.id.attachments.media_keys"],
                 media_fields=["url", "preview_image_url", "type", "alt_text", "variants", "width", "height"],
             )
@@ -101,15 +101,24 @@ class TwitterClient:
                         height=getattr(m, "height", 0) or 0,
                     ))
 
+            # For Note Tweets (long tweets), use the full text and entities from
+            # note_tweet instead of the truncated standard text field.
+            note_tweet = getattr(t, "note_tweet", None)
+            if note_tweet:
+                tweet_text: str = note_tweet.get("text", t.text)
+                entities_src: dict = note_tweet.get("entities") or {}
+            else:
+                tweet_text = t.text
+                entities_src = t.entities or {}
+
             # Collect URL entities
             url_entities: list[dict[str, str]] = []
-            if t.entities and "urls" in t.entities:
-                for u in t.entities["urls"]:
-                    url_entities.append({
-                        "url": u.get("url", ""),
-                        "expanded_url": u.get("expanded_url", ""),
-                        "display_url": u.get("display_url", ""),
-                    })
+            for u in entities_src.get("urls", []):
+                url_entities.append({
+                    "url": u.get("url", ""),
+                    "expanded_url": u.get("expanded_url", ""),
+                    "display_url": u.get("display_url", ""),
+                })
 
             # Detect self-reply (thread continuation by the same account)
             reply_to_tweet_id: str | None = None
@@ -162,7 +171,7 @@ class TwitterClient:
 
             tweets.append(Tweet(
                 id=str(t.id),
-                text=t.text,
+                text=tweet_text,
                 media=media_items,
                 urls=url_entities,
                 reply_to_tweet_id=reply_to_tweet_id,

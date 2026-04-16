@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from atproto_client.exceptions import InvokeTimeoutError, RequestException
 from atproto_client.models.blob_ref import BlobRef
 
 from bot import config
@@ -58,6 +59,95 @@ class TestLogin:
             client.login()
         assert client._logged_in
         assert call_count == 2
+
+    def test_retries_on_transient_503(self) -> None:
+        client = BlueskyClient()
+        resp_503 = SimpleNamespace(
+            success=False, status_code=503, content=None, headers={},
+        )
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RequestException(resp_503)
+            # second attempt succeeds
+
+        with (
+            patch.object(client._client, "login", side_effect=side_effect),
+            patch("bot.bluesky_client.time.sleep") as mock_sleep,
+        ):
+            client.login()
+        assert client._logged_in
+        assert call_count == 2
+        mock_sleep.assert_called_once_with(5)
+
+    def test_raises_after_max_retries(self) -> None:
+        client = BlueskyClient()
+        resp_503 = SimpleNamespace(
+            success=False, status_code=503, content=None, headers={},
+        )
+
+        with (
+            patch.object(
+                client._client, "login",
+                side_effect=RequestException(resp_503),
+            ),
+            patch("bot.bluesky_client.time.sleep"),
+            pytest.raises(RequestException),
+        ):
+            client.login()
+
+    def test_no_retry_on_client_error(self) -> None:
+        client = BlueskyClient()
+        resp_401 = SimpleNamespace(
+            success=False, status_code=401, content=None, headers={},
+        )
+
+        with (
+            patch.object(
+                client._client, "login",
+                side_effect=RequestException(resp_401),
+            ),
+            patch("bot.bluesky_client.time.sleep") as mock_sleep,
+            pytest.raises(RequestException),
+        ):
+            client.login()
+        mock_sleep.assert_not_called()
+
+    def test_retries_on_timeout(self) -> None:
+        client = BlueskyClient()
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise InvokeTimeoutError()
+            # second attempt succeeds
+
+        with (
+            patch.object(client._client, "login", side_effect=side_effect),
+            patch("bot.bluesky_client.time.sleep") as mock_sleep,
+        ):
+            client.login()
+        assert client._logged_in
+        assert call_count == 2
+        mock_sleep.assert_called_once_with(5)
+
+    def test_timeout_raises_after_max_retries(self) -> None:
+        client = BlueskyClient()
+
+        with (
+            patch.object(
+                client._client, "login",
+                side_effect=InvokeTimeoutError(),
+            ),
+            patch("bot.bluesky_client.time.sleep"),
+            pytest.raises(InvokeTimeoutError),
+        ):
+            client.login()
 
 
 class TestBuildImageEmbed:

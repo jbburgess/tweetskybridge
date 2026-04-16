@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 
 from atproto import Client, models
+from atproto_client.exceptions import InvokeTimeoutError, RequestException
 
 from bot import config
 from bot.media import download_image, download_video, fetch_og_metadata, get_image_dimensions, get_video_dimensions, select_best_variant
@@ -12,6 +14,10 @@ from bot.text import build_text_builder, resolve_urls, split_text_for_thread
 from bot.urls import is_twitter_photo_url, is_twitter_status_url
 
 log = logging.getLogger(__name__)
+
+# Retry settings for transient API errors (e.g. 503 NotEnoughResources)
+_MAX_LOGIN_RETRIES = 3
+_RETRY_BACKOFF_SECONDS = 5
 
 
 @dataclass
@@ -30,7 +36,43 @@ class BlueskyClient:
         self._logged_in = False
 
     def login(self) -> None:
-        """Authenticate using a saved session string or handle/password."""
+        """Authenticate using a saved session string or handle/password.
+
+        Retries on transient server errors (e.g. 503 NotEnoughResources)
+        that can occur when the PDS is momentarily overloaded.
+        """
+        last_exc: Exception | None = None
+        for attempt in range(1, _MAX_LOGIN_RETRIES + 1):
+            try:
+                self._try_login()
+                return
+            except InvokeTimeoutError as exc:
+                last_exc = exc
+                if attempt < _MAX_LOGIN_RETRIES:
+                    log.warning(
+                        "Login attempt %d/%d timed out, retrying in %ds",
+                        attempt, _MAX_LOGIN_RETRIES, _RETRY_BACKOFF_SECONDS,
+                    )
+                    time.sleep(_RETRY_BACKOFF_SECONDS)
+                else:
+                    raise
+            except RequestException as exc:
+                last_exc = exc
+                resp = exc.response
+                status = resp.status_code if resp is not None else None
+                if status is not None and 500 <= status < 600 and attempt < _MAX_LOGIN_RETRIES:
+                    log.warning(
+                        "Login attempt %d/%d failed with status %d, retrying in %ds",
+                        attempt, _MAX_LOGIN_RETRIES, status, _RETRY_BACKOFF_SECONDS,
+                    )
+                    time.sleep(_RETRY_BACKOFF_SECONDS)
+                else:
+                    raise
+        assert last_exc is not None  # pragma: no cover
+        raise last_exc  # pragma: no cover – only reachable if loop logic changes
+
+    def _try_login(self) -> None:
+        """Single login attempt via session string or handle/password."""
         if config.cfg.BLUESKY_SESSION:
             try:
                 self._client.login(session_string=config.cfg.BLUESKY_SESSION)

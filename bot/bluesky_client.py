@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 
 from atproto import Client, models
-from atproto_client.exceptions import InvokeTimeoutError, RequestException
+from atproto_client.exceptions import BadRequestError, InvokeTimeoutError, RequestException
 
 from bot import config
 from bot.media import download_image, download_video, fetch_og_metadata, get_image_dimensions, get_video_dimensions, select_best_variant
@@ -51,6 +51,16 @@ class BlueskyClient:
                 if attempt < _MAX_LOGIN_RETRIES:
                     log.warning(
                         "Login attempt %d/%d timed out, retrying in %ds",
+                        attempt, _MAX_LOGIN_RETRIES, _RETRY_BACKOFF_SECONDS,
+                    )
+                    time.sleep(_RETRY_BACKOFF_SECONDS)
+                else:
+                    raise
+            except BadRequestError as exc:
+                last_exc = exc
+                if attempt < _MAX_LOGIN_RETRIES:
+                    log.warning(
+                        "Login attempt %d/%d got 400 Bad Request (transient), retrying in %ds",
                         attempt, _MAX_LOGIN_RETRIES, _RETRY_BACKOFF_SECONDS,
                     )
                     time.sleep(_RETRY_BACKOFF_SECONDS)

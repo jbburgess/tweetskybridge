@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from atproto_client.exceptions import InvokeTimeoutError, RequestException
+from atproto_client.exceptions import BadRequestError, InvokeTimeoutError, RequestException
 from atproto_client.models.blob_ref import BlobRef
 
 from bot import config
@@ -146,6 +146,39 @@ class TestLogin:
             ),
             patch("bot.bluesky_client.time.sleep"),
             pytest.raises(InvokeTimeoutError),
+        ):
+            client.login()
+
+    def test_retries_on_bad_request(self) -> None:
+        client = BlueskyClient()
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise BadRequestError()
+            # second attempt succeeds
+
+        with (
+            patch.object(client._client, "login", side_effect=side_effect),
+            patch("bot.bluesky_client.time.sleep") as mock_sleep,
+        ):
+            client.login()
+        assert client._logged_in
+        assert call_count == 2
+        mock_sleep.assert_called_once_with(5)
+
+    def test_bad_request_raises_after_max_retries(self) -> None:
+        client = BlueskyClient()
+
+        with (
+            patch.object(
+                client._client, "login",
+                side_effect=BadRequestError(),
+            ),
+            patch("bot.bluesky_client.time.sleep"),
+            pytest.raises(BadRequestError),
         ):
             client.login()
 

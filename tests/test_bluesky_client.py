@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-from atproto_client.exceptions import BadRequestError, InvokeTimeoutError, RequestException
+from atproto_client.exceptions import BadRequestError, InvokeTimeoutError, NetworkError, RequestException
 from atproto_client.models.blob_ref import BlobRef
 
 from bot import config
@@ -148,6 +148,46 @@ class TestLogin:
             pytest.raises(InvokeTimeoutError),
         ):
             client.login()
+
+    def test_retries_on_network_error_502(self) -> None:
+        client = BlueskyClient()
+        resp_502 = SimpleNamespace(
+            success=False, status_code=502, content=None, headers={},
+        )
+        call_count = 0
+
+        def side_effect(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise NetworkError(resp_502)
+            # second attempt succeeds
+
+        with (
+            patch.object(client._client, "login", side_effect=side_effect),
+            patch("bot.bluesky_client.time.sleep") as mock_sleep,
+        ):
+            client.login()
+        assert client._logged_in
+        assert call_count == 2
+        mock_sleep.assert_called_once_with(5)
+
+    def test_network_error_no_retry_on_non_5xx(self) -> None:
+        client = BlueskyClient()
+        resp_404 = SimpleNamespace(
+            success=False, status_code=404, content=None, headers={},
+        )
+
+        with (
+            patch.object(
+                client._client, "login",
+                side_effect=NetworkError(resp_404),
+            ),
+            patch("bot.bluesky_client.time.sleep") as mock_sleep,
+            pytest.raises(NetworkError),
+        ):
+            client.login()
+        mock_sleep.assert_not_called()
 
     def test_retries_on_bad_request(self) -> None:
         client = BlueskyClient()

@@ -158,6 +158,21 @@ class TestFetchRecentTweets:
 
     @patch("bot.twitter_client.save_twitter_user_id")
     @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
+    def test_forbidden_returns_empty(
+        self, mock_load: MagicMock, mock_save: MagicMock
+    ) -> None:
+        client = TwitterClient.__new__(TwitterClient)
+        client._client = MagicMock()
+        client._client.get_users_tweets.side_effect = tweepy.errors.Forbidden(
+            MagicMock()
+        )
+
+        result = client.fetch_recent_tweets()
+
+        assert result == []
+
+    @patch("bot.twitter_client.save_twitter_user_id")
+    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
     def test_no_data_returns_empty(
         self, mock_load: MagicMock, mock_save: MagicMock
     ) -> None:

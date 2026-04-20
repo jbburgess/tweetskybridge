@@ -70,10 +70,13 @@ class BlueskyClient:
                     raise
             except BadRequestError as exc:
                 last_exc = exc
+                resp = exc.response
+                status = resp.status_code if resp is not None else None
+                error_detail = f"status {status}" if status is not None else str(exc) or exc.__class__.__name__
                 if attempt < _MAX_LOGIN_RETRIES:
                     log.warning(
-                        "Login attempt %d/%d got 400 Bad Request (transient), retrying in %ds",
-                        attempt, _MAX_LOGIN_RETRIES, _RETRY_BACKOFF_SECONDS,
+                        "Login attempt %d/%d got bad request error (%s), retrying in %ds",
+                        attempt, _MAX_LOGIN_RETRIES, error_detail, _RETRY_BACKOFF_SECONDS,
                     )
                     time.sleep(_RETRY_BACKOFF_SECONDS)
                 else:

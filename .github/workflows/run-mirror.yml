@@ -2,7 +2,7 @@ name: X → Bluesky mirror
 
 on:
   schedule:
-    - cron: '*/30 0-5,16-23 * * *'
+    - cron: '0 0-6,15-23 * * *'
   workflow_dispatch:
 
 concurrency:

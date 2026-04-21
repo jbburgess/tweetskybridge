@@ -50,6 +50,9 @@ class TwitterClient:
         except tweepy.TooManyRequests:
             log.warning("Hit Twitter rate limit, skipping this run")
             return []
+        except tweepy.errors.Forbidden:
+            log.warning("Twitter API returned 403 Forbidden (transient), skipping this run")
+            return []
 
         if resp.data is None:
             log.info("No tweets returned for @%s", config.cfg.TWITTER_HANDLE)

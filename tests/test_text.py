@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from bot.text import _grapheme_len, _split_into_chunks, build_text_builder, resolve_urls, split_text_for_thread, truncate
+from bot.text import _grapheme_len, _HASHTAG_RE, _split_into_chunks, build_text_builder, resolve_urls, split_text_for_thread, truncate
 from bot.models import MediaItem, Tweet
 
 pytestmark = pytest.mark.unit
@@ -293,3 +293,73 @@ class TestSplitTextForThread:
         stripped_parts = [re.sub(r" \(\d+/\d+\)$", "", p) for p in parts]
         recovered = " ".join(stripped_parts)
         assert recovered == text
+
+
+class TestHashtagRegex:
+    def test_simple_hashtag(self) -> None:
+        assert _HASHTAG_RE.findall("Hello #MLS") == ["MLS"]
+
+    def test_multiple_hashtags(self) -> None:
+        assert _HASHTAG_RE.findall("#Quakes74 and #MLS") == ["Quakes74", "MLS"]
+
+    def test_hashtag_with_unicode(self) -> None:
+        assert _HASHTAG_RE.findall("#Göteborg") == ["Göteborg"]
+
+    def test_no_match_inside_url(self) -> None:
+        # '#' inside a URL-like token preceded by a word char should NOT match
+        assert _HASHTAG_RE.findall("https://example.com/page#section") == []
+
+    def test_no_match_html_entity(self) -> None:
+        # &#x27; should not produce a hashtag
+        assert _HASHTAG_RE.findall("It&#x27;s fine") == []
+
+    def test_hashtag_at_start(self) -> None:
+        assert _HASHTAG_RE.findall("#GameDay is here") == ["GameDay"]
+
+    def test_hashtag_only(self) -> None:
+        assert _HASHTAG_RE.findall("#SJvLAFC") == ["SJvLAFC"]
+
+
+class TestBuildTextBuilderHashtags:
+    def test_single_hashtag_produces_tag_facet(self) -> None:
+        tweet = Tweet(id="300", text="Go Quakes! #SJvLAFC")
+        tb = build_text_builder("Go Quakes! #SJvLAFC", tweet)
+        assert tb.build_text() == "Go Quakes! #SJvLAFC"
+        facets = tb.build_facets()
+        assert facets is not None
+        assert len(facets) == 1
+        assert facets[0].features[0].tag == "SJvLAFC"
+
+    def test_multiple_hashtags(self) -> None:
+        tweet = Tweet(id="301", text="#Quakes74 let's go #MLS")
+        tb = build_text_builder("#Quakes74 let's go #MLS", tweet)
+        assert tb.build_text() == "#Quakes74 let's go #MLS"
+        facets = tb.build_facets()
+        assert facets is not None
+        assert len(facets) == 2
+        tags = [f.features[0].tag for f in facets]
+        assert "Quakes74" in tags
+        assert "MLS" in tags
+
+    def test_hashtag_and_url_together(self) -> None:
+        tweet = Tweet(
+            id="302",
+            text="Check out #MLS https://t.co/abc",
+            urls=[{
+                "url": "https://t.co/abc",
+                "expanded_url": "https://example.com/mls",
+                "display_url": "example.com/mls",
+            }],
+        )
+        resolved = resolve_urls(tweet)
+        tb = build_text_builder(resolved, tweet)
+        assert tb.build_text() == "Check out #MLS https://example.com/mls"
+        facets = tb.build_facets()
+        assert facets is not None
+        # One tag facet + one link facet
+        assert len(facets) == 2
+
+    def test_no_hashtags_no_extra_facets(self, simple_tweet: Tweet) -> None:
+        tb = build_text_builder("Hello world", simple_tweet)
+        facets = tb.build_facets()
+        assert facets is None or len(facets) == 0

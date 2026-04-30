@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import logging
+import re
 import unicodedata
 
 from atproto import client_utils
@@ -11,6 +12,11 @@ from bot.models import Tweet
 from bot.urls import is_twitter_media_url, is_twitter_photo_url, is_twitter_status_url
 
 log = logging.getLogger(__name__)
+
+# Matches a hashtag: '#' followed by one or more word characters (letters,
+# digits, underscore — including Unicode).  The lookbehind prevents matching
+# inside a URL or after an ampersand (e.g. "&#x27;").
+_HASHTAG_RE = re.compile(r"(?<![&\w])#(\w+)", re.UNICODE)
 
 
 def _grapheme_len(text: str) -> int:
@@ -166,11 +172,28 @@ def split_text_for_thread(
     return [f"{chunk} ({k}/{n})" for k, chunk in enumerate(raw_chunks, 1)]
 
 
-def build_text_builder(text: str, tweet: Tweet) -> client_utils.TextBuilder:
-    """Build an atproto ``TextBuilder`` with link facets for URLs in *text*.
+def _append_text_with_tags(
+    tb: client_utils.TextBuilder, text: str
+) -> None:
+    """Append *text* to *tb*, converting any ``#hashtag`` tokens to tag facets."""
+    pos = 0
+    for m in _HASHTAG_RE.finditer(text):
+        start = m.start()
+        if start > pos:
+            tb.text(text[pos:start])
+        tag_value = m.group(1)          # without '#'
+        tag_display = m.group(0)        # with '#'
+        tb.tag(tag_display, tag_value)
+        pos = m.end()
+    if pos < len(text):
+        tb.text(text[pos:])
 
-    Non-URL facets (mentions, hashtags) are left as plain text because we
-    cannot reliably resolve Twitter handles to Bluesky DIDs.
+
+def build_text_builder(text: str, tweet: Tweet) -> client_utils.TextBuilder:
+    """Build an atproto ``TextBuilder`` with link and hashtag facets.
+
+    Mentions are left as plain text because we cannot reliably resolve
+    Twitter handles to Bluesky DIDs.
     """
     tb = client_utils.TextBuilder()
 
@@ -189,11 +212,11 @@ def build_text_builder(text: str, tweet: Tweet) -> client_utils.TextBuilder:
 
         idx = remaining.index(expanded)
         if idx > 0:
-            tb.text(remaining[:idx])
+            _append_text_with_tags(tb, remaining[:idx])
         tb.link(expanded, expanded)
         remaining = remaining[idx + len(expanded):]
 
     if remaining:
-        tb.text(remaining)
+        _append_text_with_tags(tb, remaining)
 
     return tb

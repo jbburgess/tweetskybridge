@@ -168,6 +168,52 @@ Add the following line to schedule runs every 10 minutes during hours 7–21 (7:
 */10 7-21 * * * /absolute/path/to/scripts/trigger-mirror.sh >> ~/mirror-trigger.log 2>&1
 ```
 
+### Fully local runs (`scripts/run_mirror_local.py`)
+
+If you'd rather skip GitHub Actions entirely and run the mirror on your own machine — including committing and pushing `seen_ids.json` updates — use `scripts/run_mirror_local.py`. It executes the same pipeline as `main.py` in-process and then performs the same git steps the workflow does.
+
+**Prerequisites:**
+
+- Project dependencies installed in your active environment (`pip install -r requirements.txt`)
+- A `.env` file (or exported environment variables) with the same credentials documented in [Configuration](#configuration)
+- A working git remote with push credentials configured (SSH key or credential helper / PAT) if you intend to push
+
+**One-shot (recommended for OS cron / Task Scheduler):**
+
+```bash
+python scripts/run_mirror_local.py            # run once, commit + push
+python scripts/run_mirror_local.py --no-push  # run once, commit locally only
+python scripts/run_mirror_local.py --once --no-commit --no-push -v   # dry-ish run
+```
+
+**Loop mode (runs continuously, sleeping between iterations):**
+
+```bash
+python scripts/run_mirror_local.py --loop                    # default --interval 600
+python scripts/run_mirror_local.py --loop --interval 1800    # every 30 minutes
+```
+
+**Cron example (Linux/macOS/WSL), every 10 minutes during 7–21:**
+
+```bash
+*/10 7-21 * * * cd /absolute/path/to/bskybot-sjearthquakes && /absolute/path/to/.venv/bin/python scripts/run_mirror_local.py >> ~/mirror-local.log 2>&1
+```
+
+**Windows Task Scheduler:** create a Basic Task that runs `python.exe` (from your venv) with arguments `scripts\run_mirror_local.py` and "Start in" set to the repo root.
+
+**Useful flags:**
+
+| Flag | Purpose |
+| ---- | ------- |
+| `--once` / `--loop` | Pick execution mode (default `--once`) |
+| `--interval N` | Seconds between iterations in loop mode (default `600`) |
+| `--no-commit` | Skip the git commit step |
+| `--no-push` | Commit locally but don't push |
+| `--commit-author "Name <email>"` | Override the commit author for this run only (does not modify your git config) |
+| `--commit-message MSG` | Override the commit message |
+| `--remote NAME` / `--branch NAME` | Override push target (defaults: `origin` / current branch) |
+| `-v` / `--verbose` | DEBUG-level logging |
+
 ---
 
 ## How It Works

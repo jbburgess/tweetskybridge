@@ -4,8 +4,10 @@ import logging
 import time
 from dataclasses import dataclass
 
+import httpx
 from atproto import Client, models
 from atproto_client.exceptions import BadRequestError, InvokeTimeoutError, NetworkError, RequestException
+from atproto_client.request import Request
 
 from bot import config
 from bot.media import download_image, download_video, fetch_og_metadata, get_image_dimensions, get_video_dimensions, select_best_variant
@@ -18,6 +20,9 @@ log = logging.getLogger(__name__)
 # Retry settings for transient API errors (e.g. 503 NotEnoughResources)
 _MAX_LOGIN_RETRIES = 3
 _RETRY_BACKOFF_SECONDS = 5
+
+# httpx's default 5s read timeout is too short for blob uploads to the PDS.
+_HTTP_TIMEOUT = httpx.Timeout(connect=10.0, read=60.0, write=60.0, pool=10.0)
 
 
 @dataclass
@@ -32,7 +37,7 @@ class BlueskyClient:
     """Wraps the atproto SDK for posting to Bluesky."""
 
     def __init__(self) -> None:
-        self._client = Client()
+        self._client = Client(request=Request(timeout=_HTTP_TIMEOUT))
         self._logged_in = False
 
     def login(self) -> None:
@@ -262,6 +267,18 @@ class BlueskyClient:
         )
         return has_photo and has_video
 
+    def _upload_blob_with_retry(self, data: bytes, source_url: str):
+        """Upload a blob, retrying once on transient timeouts/network errors."""
+        try:
+            return self._client.upload_blob(data).blob
+        except (InvokeTimeoutError, NetworkError) as exc:
+            log.warning(
+                "Blob upload for %s failed (%s); retrying once",
+                source_url, exc.__class__.__name__,
+            )
+            time.sleep(_RETRY_BACKOFF_SECONDS)
+            return self._client.upload_blob(data).blob
+
     def _build_image_embed(self, tweet: Tweet) -> models.AppBskyEmbedImages.Main | None:
         """Download tweet images and build an image embed (up to 4)."""
         photos = [m for m in tweet.media if m.type == "photo" and m.url]
@@ -276,7 +293,20 @@ class BlueskyClient:
                 log.warning("Failed to download image %s, skipping", item.url)
                 continue
 
-            blob = self._client.upload_blob(data).blob
+            try:
+                blob = self._upload_blob_with_retry(data, item.url)
+            except InvokeTimeoutError:
+                log.warning(
+                    "Timed out uploading image %s (%d bytes), skipping",
+                    item.url, len(data),
+                )
+                continue
+            except Exception:
+                log.warning(
+                    "Failed to upload image %s (%d bytes), skipping",
+                    item.url, len(data), exc_info=True,
+                )
+                continue
             w = item.width
             h = item.height
             if not (w and h):

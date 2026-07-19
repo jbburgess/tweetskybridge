@@ -6,7 +6,17 @@ from pathlib import Path
 import pytest
 
 from bot import config
-from bot.state import load_post_map, load_seen, load_twitter_user_id, save_post_map, save_twitter_user_id
+from bot.state import (
+    load_pin_audit_date,
+    load_pinned_post,
+    load_post_map,
+    load_seen,
+    load_twitter_user_id,
+    save_pin_audit_date,
+    save_pinned_post,
+    save_post_map,
+    save_twitter_user_id,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -217,3 +227,70 @@ class TestTwitterUserIdCache:
         data = json.loads(state.read_text())
         assert data["twitter_user_id"] == "99999"
         assert set(data["posts"]) == {"10", "20"}
+
+
+class TestPinAuditDate:
+    def test_roundtrip(self, tmp_path: Path) -> None:
+        state = tmp_path / "state.json"
+        state.write_text(json.dumps({"posts": {}}))
+        config.cfg.STATE_FILE = str(state)
+
+        save_pin_audit_date("2026-07-18")
+        assert load_pin_audit_date() == "2026-07-18"
+
+    def test_missing_returns_none(self, tmp_path: Path) -> None:
+        config.cfg.STATE_FILE = str(tmp_path / "missing.json")
+        assert load_pin_audit_date() is None
+
+    def test_save_preserves_posts(self, tmp_path: Path) -> None:
+        state = tmp_path / "state.json"
+        state.write_text(json.dumps({"posts": {"1": None}}))
+        config.cfg.STATE_FILE = str(state)
+
+        save_pin_audit_date("2026-07-18")
+
+        data = json.loads(state.read_text())
+        assert data["pin_audit_date"] == "2026-07-18"
+        assert set(data["posts"]) == {"1"}
+
+
+class TestPinnedPost:
+    def test_roundtrip(self, tmp_path: Path) -> None:
+        state = tmp_path / "state.json"
+        state.write_text(json.dumps({"posts": {}}))
+        config.cfg.STATE_FILE = str(state)
+
+        record = {"tweet_id": "42", "uri": "at://did/post/42", "cid": "c42"}
+        save_pinned_post(record)
+        assert load_pinned_post() == record
+
+    def test_missing_returns_none(self, tmp_path: Path) -> None:
+        config.cfg.STATE_FILE = str(tmp_path / "missing.json")
+        assert load_pinned_post() is None
+
+    def test_save_none_clears(self, tmp_path: Path) -> None:
+        state = tmp_path / "state.json"
+        state.write_text(json.dumps({
+            "posts": {},
+            "pinned_post": {"tweet_id": "42", "uri": "at://x", "cid": "c"},
+        }))
+        config.cfg.STATE_FILE = str(state)
+
+        save_pinned_post(None)
+        assert load_pinned_post() is None
+
+    def test_save_preserves_posts_and_user_id(self, tmp_path: Path) -> None:
+        state = tmp_path / "state.json"
+        state.write_text(json.dumps({
+            "posts": {"1": None},
+            "twitter_user_id": "99999",
+        }))
+        config.cfg.STATE_FILE = str(state)
+
+        record = {"tweet_id": "1", "uri": "at://did/post/1", "cid": "c1"}
+        save_pinned_post(record)
+
+        data = json.loads(state.read_text())
+        assert data["pinned_post"] == record
+        assert data["twitter_user_id"] == "99999"
+        assert set(data["posts"]) == {"1"}

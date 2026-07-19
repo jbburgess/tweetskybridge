@@ -1559,3 +1559,58 @@ class TestPrepareSingleVideo:
         )
         data, alt, w, h = BlueskyClient._prepare_single_video(item)
         assert data is None
+
+
+class TestSetPinnedPost:
+    def _client_with_profile(self, existing_record: object) -> BlueskyClient:
+        client = BlueskyClient()
+        client._logged_in = True
+        client._client = MagicMock()
+        client._client.me = SimpleNamespace(did="did:plc:me")
+        client._client.app.bsky.actor.profile.get.return_value = SimpleNamespace(
+            value=existing_record, cid="profile-cid",
+        )
+        return client
+
+    def _put_data(self, client: BlueskyClient):
+        client._client.com.atproto.repo.put_record.assert_called_once()
+        return client._client.com.atproto.repo.put_record.call_args.args[0]
+
+    def test_pins_post_preserving_fields(self) -> None:
+        existing = models.AppBskyActorProfile.Record(display_name="Bot", description="hi")
+        client = self._client_with_profile(existing)
+
+        client.set_pinned_post(BlueskyPostRef(uri="at://did/post/1", cid="c1"))
+
+        data = self._put_data(client)
+        assert data.collection == models.ids.AppBskyActorProfile
+        assert data.repo == "did:plc:me"
+        assert data.rkey == "self"
+        assert data.swap_record == "profile-cid"
+        assert data.record.display_name == "Bot"
+        assert data.record.description == "hi"
+        assert data.record.pinned_post.uri == "at://did/post/1"
+        assert data.record.pinned_post.cid == "c1"
+
+    def test_unpins_when_ref_none(self) -> None:
+        existing = models.AppBskyActorProfile.Record(display_name="Bot")
+        client = self._client_with_profile(existing)
+
+        client.set_pinned_post(None)
+
+        data = self._put_data(client)
+        assert data.record.pinned_post is None
+        assert data.record.display_name == "Bot"
+
+    def test_creates_record_when_profile_missing(self) -> None:
+        client = BlueskyClient()
+        client._logged_in = True
+        client._client = MagicMock()
+        client._client.me = SimpleNamespace(did="did:plc:me")
+        client._client.app.bsky.actor.profile.get.side_effect = BadRequestError()
+
+        client.set_pinned_post(BlueskyPostRef(uri="at://x", cid="c"))
+
+        data = self._put_data(client)
+        assert data.swap_record is None
+        assert data.record.pinned_post.uri == "at://x"

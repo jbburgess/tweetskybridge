@@ -103,6 +103,49 @@ class TestResolveUserId:
             client._resolve_user_id()
 
 
+class TestFetchPinnedTweetId:
+    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
+    def test_returns_pinned_id(self, mock_load: MagicMock) -> None:
+        client = TwitterClient.__new__(TwitterClient)
+        client._client = MagicMock()
+        client._client.get_user.return_value = SimpleNamespace(
+            data=SimpleNamespace(pinned_tweet_id=987),
+        )
+
+        assert client.fetch_pinned_tweet_id() == "987"
+        client._client.get_user.assert_called_once_with(
+            id="12345", user_fields=["pinned_tweet_id"],
+        )
+
+    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
+    def test_returns_none_when_no_pin(self, mock_load: MagicMock) -> None:
+        client = TwitterClient.__new__(TwitterClient)
+        client._client = MagicMock()
+        client._client.get_user.return_value = SimpleNamespace(
+            data=SimpleNamespace(pinned_tweet_id=None),
+        )
+
+        assert client.fetch_pinned_tweet_id() is None
+
+    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
+    def test_returns_none_when_no_data(self, mock_load: MagicMock) -> None:
+        client = TwitterClient.__new__(TwitterClient)
+        client._client = MagicMock()
+        client._client.get_user.return_value = SimpleNamespace(data=None)
+
+        assert client.fetch_pinned_tweet_id() is None
+
+    @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")
+    def test_returns_none_on_rate_limit(self, mock_load: MagicMock) -> None:
+        client = TwitterClient.__new__(TwitterClient)
+        client._client = MagicMock()
+        client._client.get_user.side_effect = tweepy.TooManyRequests(
+            MagicMock()
+        )
+
+        assert client.fetch_pinned_tweet_id() is None
+
+
 class TestFetchRecentTweets:
     @patch("bot.twitter_client.save_twitter_user_id")
     @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")

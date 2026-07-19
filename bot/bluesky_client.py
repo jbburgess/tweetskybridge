@@ -33,6 +33,20 @@ class BlueskyPostRef:
     cid: str
 
 
+@dataclass
+class PostedThread:
+    """The first (root) and last (tip) Bluesky posts of a posted tweet.
+
+    ``root`` is the main post — used as the subject of quote embeds and as the
+    root of downstream reply threads.  ``tip`` is the last post in the thread —
+    used as the parent when continuing a reply thread so replies visually
+    attach to the final chunk.  For a single-post tweet the two are identical.
+    """
+
+    root: BlueskyPostRef
+    tip: BlueskyPostRef
+
+
 class BlueskyClient:
     """Wraps the atproto SDK for posting to Bluesky."""
 
@@ -145,13 +159,16 @@ class BlueskyClient:
         *,
         parent_ref: BlueskyPostRef | None = None,
         root_ref: BlueskyPostRef | None = None,
-    ) -> BlueskyPostRef:
+        quoted_ref: BlueskyPostRef | None = None,
+    ) -> PostedThread:
         """Create a Bluesky post (or reply thread) from a Tweet.
 
         Long tweets are split into a chain of reply posts with ``(k/n)``
-        suffixes.  Media is attached to the first post only.  Returns the
-        URI+CID of the *last* posted record so callers can chain downstream
-        replies.
+        suffixes.  Media is attached to the first post only.  When
+        *quoted_ref* is supplied (a self-quote whose target the bot already
+        mirrored), the first post embeds that Bluesky record natively instead
+        of a link card.  Returns the root (first) and tip (last) post refs so
+        callers can chain downstream replies and record the mapping.
         """
         if not self._logged_in:
             self.login()
@@ -185,7 +202,7 @@ class BlueskyClient:
                 # For mixed-media tweets, prioritise the image gallery on the
                 # main post and defer videos to threaded replies below.
                 if mixed:
-                    embed = self._build_image_embed(tweet) or self._build_link_card(tweet)
+                    embed = self._build_first_embed(tweet, quoted_ref)
                 else:
                     # Video/GIF takes priority — send_video handles upload + post
                     video_data, video_alt, video_w, video_h = self._prepare_video(tweet)
@@ -209,7 +226,7 @@ class BlueskyClient:
                         except Exception:
                             log.warning("Bluesky rejected video for tweet %s, falling back to link card", tweet.id)
 
-                    embed = self._build_image_embed(tweet) or self._build_link_card(tweet)
+                    embed = self._build_first_embed(tweet, quoted_ref)
             else:
                 embed = None
 
@@ -251,11 +268,41 @@ class BlueskyClient:
                 except Exception:
                     log.warning("Failed to post video reply for tweet %s, skipping", tweet.id)
 
-        return prev_ref
+        assert first_ref is not None  # a post is always created above
+        return PostedThread(root=first_ref, tip=prev_ref)
 
     # ------------------------------------------------------------------
     # Embeds
     # ------------------------------------------------------------------
+
+    def _build_first_embed(
+        self, tweet: Tweet, quoted_ref: BlueskyPostRef | None,
+    ):
+        """Build the embed for a tweet's main post.
+
+        When *quoted_ref* is set the post embeds that Bluesky record natively
+        (as a quote), combining it with an image gallery when the tweet also
+        has photos.  Otherwise it falls back to an image embed or link card.
+        """
+        if quoted_ref is not None:
+            media_embed = self._build_image_embed(tweet)
+            return self._build_quote_embed(quoted_ref, media_embed)
+        return self._build_image_embed(tweet) or self._build_link_card(tweet)
+
+    @staticmethod
+    def _build_quote_embed(
+        quoted_ref: BlueskyPostRef,
+        media_embed: models.AppBskyEmbedImages.Main | None = None,
+    ):
+        """Build a record (quote) embed, optionally wrapping an image gallery."""
+        record = models.AppBskyEmbedRecord.Main(
+            record=models.ComAtprotoRepoStrongRef.Main(
+                uri=quoted_ref.uri, cid=quoted_ref.cid,
+            )
+        )
+        if media_embed is not None:
+            return models.AppBskyEmbedRecordWithMedia.Main(record=record, media=media_embed)
+        return record
 
     @staticmethod
     def _has_mixed_media(tweet: Tweet) -> bool:

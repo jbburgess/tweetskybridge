@@ -94,7 +94,7 @@ def main() -> None:
     bluesky.login()
 
     post_map = load_post_map()
-    tweets = twitter.fetch_recent_tweets()
+    tweets = twitter.fetch_recent_tweets(max_results=config.cfg.TWITTER_MAX_RESULTS)
 
     # Combined lookup of tweet ID → PostedThread, seeded from the persisted
     # mapping and extended with posts made during this run. This lets replies

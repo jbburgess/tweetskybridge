@@ -106,3 +106,19 @@ class TestLoad:
             config.load()
 
         assert config.cfg.PIN_SYNC_ENABLED is True
+
+    def test_twitter_max_results_defaults_to_5(self) -> None:
+        assert config.Config().TWITTER_MAX_RESULTS == 5
+
+    def test_twitter_max_results_overridden_by_env(self) -> None:
+        env = {
+            "TWITTER_BEARER_TOKEN": "bearer",
+            "TWITTER_HANDLE": "handle",
+            "BLUESKY_HANDLE": "bsky.social",
+            "BLUESKY_PASSWORD": "pass",
+            "TWITTER_MAX_RESULTS": "10",
+        }
+        with patch.dict(os.environ, env, clear=True):
+            config.load()
+
+        assert config.cfg.TWITTER_MAX_RESULTS == 10

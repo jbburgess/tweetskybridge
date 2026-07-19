@@ -17,6 +17,7 @@ Automatically mirror tweets from a Twitter (X) account to Bluesky — including 
   - **Cross-run reply threading** — self-reply tweets chain under the mapped Bluesky post even when the parent was posted in an earlier run
   - **Native quote embeds** — self-quote tweets embed the bot's existing Bluesky post (`app.bsky.embed.record`) instead of an external link card
   - Unmapped references (e.g., self-replies/quotes to very old tweets or replies/quotes to other Twitter accounts) fall back to the default behavior (standalone post / link card)
+- Mirrors the account's pinned tweet to the Bluesky pinned post once per day (first run after UTC midnight): pins the mapped post, replaces it when the pin changes, and unpins when Twitter has no pinned tweet (a pinned tweet older than the mapping is skipped with a warning). Disable with `PIN_SYNC_ENABLED=false`.
 - Caches the target Twitter account's numeric user ID to avoid redundant API lookups
 - Supports Bluesky session-string reuse to minimize app password logins
 - Runs via GitHub Actions, triggered either by schedule or by `workflow_dispatch`
@@ -31,7 +32,7 @@ Automatically mirror tweets from a Twitter (X) account to Bluesky — including 
 ├── bot/
 │   ├── __init__.py
 │   ├── config.py                    # Environment variable loading and validation
-│   ├── state.py                     # Tweet→Bluesky post mapping and Twitter user-ID cache
+│   ├── state.py                     # Tweet→Bluesky post mapping, pinned-post state, and Twitter user-ID cache
 │   ├── twitter_client.py            # TwitterClient: wraps tweepy for API v2
 │   ├── bluesky_client.py            # BlueskyClient: posting with images, link cards, facets
 │   ├── media.py                     # Image downloading and Open Graph metadata extraction
@@ -109,6 +110,7 @@ The bot reads credentials from environment variables. For local development, cre
 | `BLUESKY_HANDLE` | Yes | Bluesky handle (e.g. `you.bsky.social`) |
 | `BLUESKY_PASSWORD` | Yes | Bluesky App Password (recommended) or account password |
 | `BLUESKY_SESSION` | No | Exported session string for token-based re-auth |
+| `PIN_SYNC_ENABLED` | No | Mirror the Twitter pinned tweet to the Bluesky pinned post (default `true`; set `false` to disable) |
 
 ### Local `.env` example
 
@@ -231,7 +233,8 @@ python scripts/run_mirror_local.py --loop --interval 1800    # every 30 minutes
 4. **Text processing** — `bot/text.py` expands t.co URLs, strips media-only links, and truncates to 300 graphemes if needed
 5. **Media pipeline** — `bot/media.py` downloads tweet images and extracts Open Graph metadata for link cards
 6. **Bluesky post** — `BlueskyClient` builds the appropriate embed (images or external link card), constructs rich-text facets for URLs, and posts via the AT Protocol SDK
-7. **State persistence** — Updated seen IDs are saved (capped at 100) and committed to the repo by CI
+7. **Pinned-post sync** — Once per day (first run after UTC midnight), the account's pinned tweet is fetched and mirrored to the Bluesky pinned post via the tweet→post mapping (skippable with `PIN_SYNC_ENABLED=false`)
+8. **State persistence** — Updated seen IDs are saved (capped at 100) and committed to the repo by CI
 
 ---
 

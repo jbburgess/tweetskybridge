@@ -13,7 +13,10 @@ Automatically mirror tweets from a Twitter (X) account to Bluesky — including 
 - Creates rich link-card embeds (`app.bsky.embed.external`) for tweets that contain URLs but no media (only one embed allowed)
 - Applies clickable link facets to URLs in post text
 - For tweets longer than 300 graphemes, splits the text into a main post and follow-up replies to accommodate Bluesky's character limit
-- Tracks previously reposted tweet IDs in a JSON state file (capped at 100 rolling entries)
+- Maintains a rolling map of source tweet IDs to the Bluesky posts they produced (capped at 100 entries), enabling:
+  - **Cross-run reply threading** — self-reply tweets chain under the mapped Bluesky post even when the parent was posted in an earlier run
+  - **Native quote embeds** — self-quote tweets embed the bot's existing Bluesky post (`app.bsky.embed.record`) instead of an external link card
+  - Unmapped references (e.g., self-replies/quotes to very old tweets or replies/quotes to other Twitter accounts) fall back to the default behavior (standalone post / link card)
 - Caches the target Twitter account's numeric user ID to avoid redundant API lookups
 - Supports Bluesky session-string reuse to minimize app password logins
 - Runs via GitHub Actions, triggered either by schedule or by `workflow_dispatch`
@@ -28,7 +31,7 @@ Automatically mirror tweets from a Twitter (X) account to Bluesky — including 
 ├── bot/
 │   ├── __init__.py
 │   ├── config.py                    # Environment variable loading and validation
-│   ├── state.py                     # Seen-ID persistence and Twitter user-ID cache
+│   ├── state.py                     # Tweet→Bluesky post mapping and Twitter user-ID cache
 │   ├── twitter_client.py            # TwitterClient: wraps tweepy for API v2
 │   ├── bluesky_client.py            # BlueskyClient: posting with images, link cards, facets
 │   ├── media.py                     # Image downloading and Open Graph metadata extraction
@@ -86,8 +89,12 @@ pip install -r requirements.txt
 If `seen_ids.json` doesn't already exist:
 
 ```bash
-echo '{"seen_ids": []}' > seen_ids.json
+echo '{"posts": {}}' > seen_ids.json
 ```
+
+> The state file maps each mirrored tweet ID to the Bluesky post(s) it produced.
+> Legacy files (a bare list of IDs, or a `{"seen_ids": [...]}` object) are migrated
+> automatically on the next run.
 
 ---
 

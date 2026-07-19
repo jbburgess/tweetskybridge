@@ -38,19 +38,19 @@ jobs:
           BLUESKY_PASSWORD: ${{ secrets.BLUESKY_PASSWORD }}
           BLUESKY_SESSION: ${{ secrets.BLUESKY_SESSION }}
 
-      - name: Commit & push updated seen_ids.json
+      - name: Commit & push updated id_map.json
         run: |
           # Configure git author
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           # Only commit if the state file actually changed
-          if git diff --quiet seen_ids.json; then
-            echo "No changes to seen_ids.json, skipping commit."
+          if git diff --quiet id_map.json; then
+            echo "No changes to id_map.json, skipping commit."
             exit 0
           fi
 
-          git add seen_ids.json
+          git add id_map.json
           git commit -m "chore: update seen ids"
 
           # Rewrite origin to include the GITHUB_TOKEN for auth

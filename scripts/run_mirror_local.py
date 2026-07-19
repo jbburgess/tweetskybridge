@@ -1,7 +1,7 @@
 """Local alternative to the `run-mirror.yml` GitHub Actions workflow.
 
 Runs `main.main()` in-process and optionally commits and pushes
-`seen_ids.json` when it changes. Supports a single one-shot run (the
+`id_map.json` when it changes. Supports a single one-shot run (the
 default, suitable for invocation by OS cron / Task Scheduler) or a
 long-running loop that re-executes on a fixed interval.
 
@@ -26,9 +26,9 @@ from pathlib import Path
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEFAULT_REPO_ROOT = SCRIPT_DIR.parent
-STATE_FILE = "seen_ids.json"
+STATE_FILE = "id_map.json"
 DEFAULT_INTERVAL = 600  # seconds
-DEFAULT_COMMIT_MESSAGE = "chore: update seen ids"
+DEFAULT_COMMIT_MESSAGE = "chore: update id map"
 
 log = logging.getLogger("run_mirror_local")
 
@@ -37,7 +37,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Local alternative to the run-mirror.yml workflow: runs main.py "
-            "and optionally commits/pushes seen_ids.json updates."
+            "and optionally commits/pushes id_map.json updates."
         ),
     )
 
@@ -62,7 +62,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--no-commit",
         action="store_true",
-        help="Skip committing seen_ids.json changes.",
+        help="Skip committing id_map.json changes.",
     )
     parser.add_argument(
         "--no-push",
@@ -156,7 +156,7 @@ def current_branch(repo_root: Path) -> str:
 
 
 def state_file_changed(repo_root: Path) -> bool:
-    """Return True if seen_ids.json has unstaged or staged changes vs HEAD."""
+    """Return True if id_map.json has unstaged or staged changes vs HEAD."""
     # Unstaged changes
     unstaged = _git(
         ["diff", "--quiet", "--", STATE_FILE],

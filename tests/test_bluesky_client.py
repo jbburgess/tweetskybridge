@@ -4,11 +4,12 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+from atproto import models
 from atproto_client.exceptions import BadRequestError, InvokeTimeoutError, NetworkError, RequestException
 from atproto_client.models.blob_ref import BlobRef
 
 from bot import config
-from bot.bluesky_client import BlueskyClient, BlueskyPostRef
+from bot.bluesky_client import BlueskyClient, BlueskyPostRef, PostedThread
 from bot.models import MediaItem, Tweet
 
 pytestmark = pytest.mark.unit
@@ -520,7 +521,7 @@ class TestPost:
         client._client.send_post.assert_called_once()
 
     @patch.object(BlueskyClient, "login")
-    def test_post_returns_bluesky_post_ref(self, mock_login: MagicMock) -> None:
+    def test_post_returns_posted_thread(self, mock_login: MagicMock) -> None:
         client = BlueskyClient()
         client._logged_in = True
         client._client.send_post = MagicMock(
@@ -529,9 +530,9 @@ class TestPost:
 
         result = client.post(Tweet(id="1", text="hello"))
 
-        assert isinstance(result, BlueskyPostRef)
-        assert result.uri == "at://did/post/42"
-        assert result.cid == "bafycid42"
+        assert isinstance(result, PostedThread)
+        assert result.root == BlueskyPostRef(uri="at://did/post/42", cid="bafycid42")
+        assert result.tip == result.root
 
     @patch.object(BlueskyClient, "login")
     def test_reply_passes_reply_to_send_post(self, mock_login: MagicMock) -> None:
@@ -579,6 +580,48 @@ class TestPost:
 
         _, kwargs = client._client.send_post.call_args
         assert kwargs.get("reply_to") is None
+
+    @patch.object(BlueskyClient, "login")
+    def test_quoted_ref_builds_record_embed(self, mock_login: MagicMock) -> None:
+        client = BlueskyClient()
+        client._logged_in = True
+        client._client.send_post = MagicMock(
+            return_value=SimpleNamespace(uri="at://did/post/2", cid="bafycid2")
+        )
+
+        quoted = BlueskyPostRef(uri="at://did/post/1", cid="bafycid1")
+        client.post(Tweet(id="2", text="quoting myself"), quoted_ref=quoted)
+
+        _, kwargs = client._client.send_post.call_args
+        embed = kwargs.get("embed")
+        assert isinstance(embed, models.AppBskyEmbedRecord.Main)
+        assert embed.record.uri == "at://did/post/1"
+        assert embed.record.cid == "bafycid1"
+
+    @patch("bot.bluesky_client.download_image", return_value=b"\xff\xd8jpg")
+    @patch.object(BlueskyClient, "login")
+    def test_quoted_ref_with_media_builds_record_with_media(
+        self, mock_login: MagicMock, mock_dl: MagicMock,
+    ) -> None:
+        client = BlueskyClient()
+        client._logged_in = True
+        client._client.send_post = MagicMock(
+            return_value=SimpleNamespace(uri="at://did/post/2", cid="bafycid2")
+        )
+        client._client.upload_blob = MagicMock(return_value=SimpleNamespace(blob=_FAKE_BLOB))
+
+        quoted = BlueskyPostRef(uri="at://did/post/1", cid="bafycid1")
+        tweet = Tweet(
+            id="2", text="quote with pic",
+            media=[MediaItem(url="https://pbs.twimg.com/media/x.jpg", type="photo")],
+        )
+        client.post(tweet, quoted_ref=quoted)
+
+        _, kwargs = client._client.send_post.call_args
+        embed = kwargs.get("embed")
+        assert isinstance(embed, models.AppBskyEmbedRecordWithMedia.Main)
+        assert embed.record.record.uri == "at://did/post/1"
+        assert isinstance(embed.media, models.AppBskyEmbedImages.Main)
 
 
 class TestPrepareVideo:
@@ -990,8 +1033,8 @@ class TestMultiPartPost:
         tweet = Tweet(id="1", text=self._LONG_TEXT)
         result = client.post(tweet)
         n = client._client.send_post.call_count
-        assert result.uri == f"at://did/post/{n}"
-        assert result.cid == f"cid{n}"
+        assert result.tip.uri == f"at://did/post/{n}"
+        assert result.tip.cid == f"cid{n}"
 
     def test_first_chunk_has_no_reply(self) -> None:
         client = self._make_client()
@@ -1194,7 +1237,7 @@ class TestMixedMediaPost:
         assert vid_kwargs["reply_to"].parent.uri == "at://did/post/1"
 
         # Return value is the video reply ref
-        assert result.uri == "at://did/video/1"
+        assert result.tip.uri == "at://did/video/1"
 
     @patch("bot.bluesky_client.download_video", return_value=b"\x00video")
     @patch("bot.bluesky_client.select_best_variant", return_value={
@@ -1263,7 +1306,7 @@ class TestMixedMediaPost:
         assert second_vid["reply_to"].root.uri == "at://did/post/1"
 
         # Return value is the last video reply
-        assert result.uri == "at://did/video/2"
+        assert result.tip.uri == "at://did/video/2"
 
     @patch("bot.bluesky_client.download_video", side_effect=Exception("timeout"))
     @patch("bot.bluesky_client.select_best_variant", return_value={
@@ -1305,7 +1348,7 @@ class TestMixedMediaPost:
         # Video reply was never attempted (download failed in _prepare_single_video)
         client._client.send_video.assert_not_called()
         # Returned the main post ref
-        assert result.uri == "at://did/post/1"
+        assert result.tip.uri == "at://did/post/1"
 
     @patch("bot.bluesky_client.download_video", return_value=b"\x00video")
     @patch("bot.bluesky_client.select_best_variant", return_value={
@@ -1348,7 +1391,7 @@ class TestMixedMediaPost:
         # Video reply was attempted but failed
         client._client.send_video.assert_called_once()
         # Returned the main post ref (video failed)
-        assert result.uri == "at://did/post/1"
+        assert result.tip.uri == "at://did/post/1"
 
     @patch("bot.bluesky_client.download_video", return_value=b"\x00video")
     @patch("bot.bluesky_client.select_best_variant", return_value={
@@ -1384,7 +1427,7 @@ class TestMixedMediaPost:
         # Used send_video directly, not send_post
         client._client.send_video.assert_called_once()
         client._client.send_post.assert_not_called()
-        assert result.uri == "at://did/video/1"
+        assert result.tip.uri == "at://did/video/1"
 
     @patch("bot.bluesky_client.download_video", return_value=b"\x00video")
     @patch("bot.bluesky_client.select_best_variant", return_value={
@@ -1468,7 +1511,7 @@ class TestMixedMediaPost:
         assert fourth_kwargs["reply_to"].root.uri == "at://did/video/1"
 
         # Return value is the last video reply
-        assert result.uri == "at://did/video/4"
+        assert result.tip.uri == "at://did/video/4"
 
 
 class TestPrepareSingleVideo:

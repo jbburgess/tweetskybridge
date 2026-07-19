@@ -40,6 +40,9 @@ class Config:
     # Bluesky grapheme limit
     BLUESKY_GRAPHEME_LIMIT: int = 300
 
+    # Whether to mirror the Twitter pinned tweet to the Bluesky pinned post
+    PIN_SYNC_ENABLED: bool = True
+
 
 cfg = Config()
 
@@ -63,3 +66,7 @@ def load() -> None:
         sys.exit(1)
 
     cfg.BLUESKY_SESSION = os.environ.get("BLUESKY_SESSION", "")
+
+    pin_sync = os.environ.get("PIN_SYNC_ENABLED")
+    if pin_sync is not None:
+        cfg.PIN_SYNC_ENABLED = pin_sync.strip().lower() in ("1", "true", "yes", "on")

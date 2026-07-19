@@ -135,6 +135,52 @@ class BlueskyClient:
         return self._client.export_session_string()
 
     # ------------------------------------------------------------------
+    # Profile / pinned post
+    # ------------------------------------------------------------------
+
+    def set_pinned_post(self, ref: BlueskyPostRef | None) -> None:
+        """Set (or clear) the pinned post on the bot's Bluesky profile.
+
+        Reads the current ``app.bsky.actor.profile`` record, updates its
+        ``pinned_post`` field in place (preserving all other profile fields),
+        and writes it back with an optimistic ``swap_record`` guard.  Passing
+        ``None`` unpins.
+        """
+        if not self._logged_in:
+            self.login()
+
+        assert self._client.me is not None  # set by login()
+        did = self._client.me.did
+        pinned = (
+            models.ComAtprotoRepoStrongRef.Main(uri=ref.uri, cid=ref.cid)
+            if ref is not None else None
+        )
+
+        try:
+            current = self._client.app.bsky.actor.profile.get(did, "self")
+            record = current.value
+            record.pinned_post = pinned
+            swap_cid = current.cid
+        except BadRequestError:
+            # No existing profile record yet — create a minimal one.
+            record = models.AppBskyActorProfile.Record(pinned_post=pinned)
+            swap_cid = None
+
+        self._client.com.atproto.repo.put_record(
+            models.ComAtprotoRepoPutRecord.Data(
+                collection=models.ids.AppBskyActorProfile,
+                repo=did,
+                rkey="self",
+                swap_record=swap_cid,
+                record=record,
+            )
+        )
+        if ref is not None:
+            log.info("Pinned Bluesky post %s", ref.uri)
+        else:
+            log.info("Cleared Bluesky pinned post")
+
+    # ------------------------------------------------------------------
     # Posting
     # ------------------------------------------------------------------
 

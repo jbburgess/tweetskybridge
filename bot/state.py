@@ -87,3 +87,31 @@ def save_twitter_user_id(user_id: str) -> None:
     data = _read_state()
     data["twitter_user_id"] = user_id
     _write_state(data)
+
+
+def load_pin_audit_date() -> str | None:
+    """Return the ISO date (UTC) of the last pinned-post audit, or None."""
+    return _read_state().get("pin_audit_date")
+
+
+def save_pin_audit_date(date_str: str) -> None:
+    """Record the ISO date (UTC) of the most recent pinned-post audit."""
+    data = _read_state()
+    data["pin_audit_date"] = date_str
+    _write_state(data)
+
+
+def load_pinned_post() -> dict | None:
+    """Return the currently-pinned Bluesky post record, or None.
+
+    The record holds the source ``tweet_id`` plus the Bluesky ``uri``/``cid``
+    of the post the bot has pinned, used to avoid redundant profile writes.
+    """
+    return _read_state().get("pinned_post")
+
+
+def save_pinned_post(record: dict | None) -> None:
+    """Persist the currently-pinned Bluesky post record (or None when unpinned)."""
+    data = _read_state()
+    data["pinned_post"] = record
+    _write_state(data)

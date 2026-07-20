@@ -33,6 +33,8 @@ A Python bot that mirrors tweets from a Twitter (X) account to a corresponding B
     - *Optional:* Use `scripts/trigger-mirror.sh` to trigger the Actions workflow from a local cron job. Provides more reliable execution than the native Actions `schedule` trigger, while still executing the workflow in GitHub
   - Fully local runs are also supported via `scripts/run_mirror_local.py`, bypassing GitHub Actions entirely.
 
+> Note: If you want to run the bot in GitHub Actions, you will need to fork this repository to a personal repository that you control.
+
 ---
 
 ## Project Structure

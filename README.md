@@ -33,7 +33,7 @@ A Python bot that mirrors tweets from a Twitter (X) account to a corresponding B
     - *Optional:* Use `scripts/trigger-mirror.sh` to trigger the Actions workflow from a local cron job. Provides more reliable execution than the native Actions `schedule` trigger, while still executing the workflow in GitHub
   - Fully local runs are also supported via `scripts/run_mirror_local.py`, bypassing GitHub Actions entirely.
 
-> Note: If you want to run the bot in GitHub Actions, you will need to fork this repository to a personal repository that you control.
+> [!NOTE] If you want to run the bot in GitHub Actions, you will need to fork this repository to a personal repository that you control.
 
 ---
 
@@ -58,7 +58,7 @@ A Python bot that mirrors tweets from a Twitter (X) account to a corresponding B
 ├── scripts/
 │   ├── run_mirror_local.py          # Local runner with optional commit/push workflow
 │   └── trigger-mirror.sh            # Optional local cron trigger for Actions workflow_dispatch
-├── tests/
+├── tests/                           # Unit test suite
 │   ├── conftest.py
 │   ├── test_bluesky_client.py
 │   ├── test_config.py
@@ -70,8 +70,8 @@ A Python bot that mirrors tweets from a Twitter (X) account to a corresponding B
 │   └── test_twitter_client.py
 └── .github/
     └── workflows/
-        ├── ci.yml                   # Linting and test workflow
-        └── run-mirror.yml           # Scheduled/manual execution workflow
+        ├── ci.yml                   # Linting and test workflow (GitHub Actions)
+        └── run-mirror.yml           # Scheduled/manual execution workflow (GitHub Actions)
 ```
 
 ---
@@ -123,7 +123,7 @@ If `id_map.json` doesn't already exist:
 echo '{"posts": {}}' > id_map.json
 ```
 
-> The state file maps each mirrored tweet ID to the Bluesky post(s) it produced.
+> [!NOTE] The state file maps each mirrored tweet ID to the Bluesky post(s) it produced.
 
 ---
 
@@ -244,7 +244,7 @@ on:
 ### Local cron trigger
 
 GitHub's built-in `schedule` event trigger is best-effort and *will* delay and drop runs.
-For more reliable scheduling at short intervals, a local cron job can be used to execute `scripts/trigger-mirror.sh`, which dispatches the workflow via the `gh` CLI. This differs from (fully local runs)[#fully-local-runs-scriptsrun_mirror_localpy] in that the bot itself is still executed within GitHub Actions rather than on your local machine. This local script simply calls the `workflow_dispatch` event to manually trigger the Actions workflow at the specified intervals.
+For more reliable scheduling at short intervals, a local cron job can be used to execute `scripts/trigger-mirror.sh`, which dispatches the workflow via the `gh` CLI. This differs from [fully local runs](#fully-local-runs-scriptsrun_mirror_localpy) in that the bot itself is still executed within GitHub Actions rather than on your local machine. This local script simply calls the `workflow_dispatch` event to manually trigger the Actions workflow at the specified intervals.
 
 **Prerequisites:**
 
@@ -296,19 +296,27 @@ Add the following line to schedule runs every 10 minutes during hours 7–21 (7:
 #### Twitter API v2
 
 1. Sign up for a Developer account at [developer.x.com](https://developer.x.com/)
+
+> [!NOTE] This is a personal developer account used to make calls to the Twitter API; It is not tied to the Twitter account specified for mirroring. Since you're only reading the public tweets of whichever account you're mirroring, any Twitter account can be specified and no direct access is necessary.
+
 2. Create a new App within a Project
 3. Copy your **Bearer Token** from the "Keys and tokens" page
 
 #### Bluesky
 
-1. Sign up at [bsky.app](https://bsky.app/)
+1. Sign up at [bsky.app](https://bsky.app/) and setup the account.
+
+> [!NOTE] This will be the Bluesky account that tweets will be mirrored to and posted on, not a personal developer account. Since mirroring to Bluesky requires write permissions on the destination Bluesky account, you're providing the bot with access directly to the target account.
+
 2. Generate an **App Password** under Settings > Privacy and Security > App Passwords (recommended over your main password)
+
+See [Configuration](#configuration) for details on how to use the Twitter and Bluesky credentials.
 
 ### Estimated Costs
 
 #### Twitter API v2
 
-> There is **no free tier** available anymore for Twitter API calls, so any usage at all *will* incur at least minimal costs and you must have available funds or a paid subscription on your Twitter developer account for the bot to work.
+> [!WARNING] There is **no free tier** available anymore for Twitter Developer accounts, so any usage at all *will* incur at least minimal costs and you must have available funds or a paid subscription on your Twitter developer account for the bot to work.
 
 Depending on how active the target Twitter account is, costs may vary significantly. Here are some ballpark estimates (these are *not* guaranteed and Twitter may change their pricing model at any time):
 

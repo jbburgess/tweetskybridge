@@ -31,8 +31,8 @@ class Config:
     # Maximum image download size in bytes (5 MB)
     MAX_IMAGE_BYTES: int = 5 * 1024 * 1024
 
-    # Maximum video download size in bytes (50 MB — Bluesky limit)
-    MAX_VIDEO_BYTES: int = 50 * 1024 * 1024
+    # Maximum video download size in bytes (100 MB — Bluesky limit)
+    MAX_VIDEO_BYTES: int = 100 * 1024 * 1024
 
     # HTTP timeout for media / OG-metadata fetches (seconds)
     HTTP_TIMEOUT: int = 15

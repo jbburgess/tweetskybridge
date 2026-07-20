@@ -33,8 +33,6 @@ A Python bot that mirrors tweets from a Twitter (X) account to a corresponding B
     - *Optional:* Use `scripts/trigger-mirror.sh` to trigger the Actions workflow from a local cron job. Provides more reliable execution than the native Actions `schedule` trigger, while still executing the workflow in GitHub
   - Fully local runs are also supported via `scripts/run_mirror_local.py`, bypassing GitHub Actions entirely.
 
-> [!NOTE] If you want to run the bot in GitHub Actions, you will need to fork this repository to a personal repository that you control.
-
 ---
 
 ## Project Structure
@@ -123,7 +121,8 @@ If `id_map.json` doesn't already exist:
 echo '{"posts": {}}' > id_map.json
 ```
 
-> [!NOTE] The state file maps each mirrored tweet ID to the Bluesky post(s) it produced.
+> [!NOTE]
+> The state file maps each mirrored tweet ID to the Bluesky post(s) it produced.
 
 ---
 
@@ -151,7 +150,7 @@ BLUESKY_PASSWORD=your_app_password
 
 ### GitHub Actions
 
-Add each variable as a **repository secret** under **Settings > Secrets and variables > Actions**.
+Add each variable as a **repository secret** under `Settings` > `Secrets and variables` > `Actions`. See [GitHub Actions Deployment](#github-actions-deployment) for more details.
 
 ---
 
@@ -226,7 +225,10 @@ python scripts/run_mirror_local.py --interval 300 --loop --no-commit --no-push  
 
 ## GitHub Actions Deployment
 
-The workflow at `.github/workflows/run-mirror.yml`:
+> [!IMPORTANT]
+> If you want to run the bot in GitHub Actions, you will need to fork this repository to a personal repository that you control.
+
+Runs via the included Actions workflow, `.github/workflows/run-mirror.yml`:
 
 - Triggered via `workflow_dispatch` (manual or automated) or `schedule` (automatic)
 - Only commits `id_map.json` back to the repo **when it actually changes**
@@ -297,7 +299,8 @@ Add the following line to schedule runs every 10 minutes during hours 7–21 (7:
 
 1. Sign up for a Developer account at [developer.x.com](https://developer.x.com/)
 
-> [!NOTE] This is a personal developer account used to make calls to the Twitter API; It is not tied to the Twitter account specified for mirroring. Since you're only reading the public tweets of whichever account you're mirroring, any Twitter account can be specified and no direct access is necessary.
+> [!NOTE]
+> This is a personal developer account used to make calls to the Twitter API; It is not tied to the Twitter account specified for mirroring. Since you're only reading the public tweets of whichever account you're mirroring, any Twitter account can be specified and no direct access is necessary.
 
 2. Create a new App within a Project
 3. Copy your **Bearer Token** from the "Keys and tokens" page
@@ -306,17 +309,19 @@ Add the following line to schedule runs every 10 minutes during hours 7–21 (7:
 
 1. Sign up at [bsky.app](https://bsky.app/) and setup the account.
 
-> [!NOTE] This will be the Bluesky account that tweets will be mirrored to and posted on, not a personal developer account. Since mirroring to Bluesky requires write permissions on the destination Bluesky account, you're providing the bot with access directly to the target account.
+> [!NOTE]
+> This will be the Bluesky account that tweets will be mirrored to and posted on, not a personal developer account. Since mirroring to Bluesky requires write permissions on the destination Bluesky account, you're providing the bot with access directly to the target account.
 
 2. Generate an **App Password** under Settings > Privacy and Security > App Passwords (recommended over your main password)
 
-See [Configuration](#configuration) for details on how to use the Twitter and Bluesky credentials.
+See [Configuration](#configuration) for details on where to store and how to use the Twitter and Bluesky credentials.
 
 ### Estimated Costs
 
 #### Twitter API v2
 
-> [!WARNING] There is **no free tier** available anymore for Twitter Developer accounts, so any usage at all *will* incur at least minimal costs and you must have available funds or a paid subscription on your Twitter developer account for the bot to work.
+> [!WARNING]
+> There is **no free tier** available anymore for Twitter Developer accounts, so any usage at all *will* incur at least minimal costs and you must have available funds or a paid subscription on your Twitter developer account for the bot to work.
 
 Depending on how active the target Twitter account is, costs may vary significantly. Here are some ballpark estimates (these are *not* guaranteed and Twitter may change their pricing model at any time):
 

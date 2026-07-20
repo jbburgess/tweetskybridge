@@ -97,8 +97,8 @@ A Python bot that mirrors tweets from a Twitter (X) account to a corresponding B
 ### 1. Clone the repo
 
 ```bash
-git clone https://github.com/jbburgess/bskybot-sjearthquakes.git
-cd bskybot-sjearthquakes
+git clone https://github.com/jbburgess/tweetskybridge.git
+cd tweetskybridge
 ```
 
 ### 2. Create a virtual environment
@@ -219,7 +219,7 @@ python scripts/run_mirror_local.py --interval 300 --loop --no-commit --no-push  
 **Cron example (Linux/macOS/WSL), every 10 minutes during 7–21:**
 
 ```bash
-*/10 7-21 * * * cd /absolute/path/to/bskybot-sjearthquakes && /absolute/path/to/.venv/bin/python scripts/run_mirror_local.py >> ~/mirror-local.log 2>&1
+*/10 7-21 * * * cd /absolute/path/to/tweetskybridge && /absolute/path/to/.venv/bin/python scripts/run_mirror_local.py >> ~/mirror-local.log 2>&1
 ```
 
 **Windows Task Scheduler:** create a Basic Task that runs `python.exe` (from your venv) with arguments `scripts\run_mirror_local.py` and "Start in" set to the repo root.

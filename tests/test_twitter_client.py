@@ -571,7 +571,7 @@ class TestNoteTweets:
         )
         quoted_obj = SimpleNamespace(
             id=999,
-            text="3 goals for @SJEarthquakes!",
+            text="3 goals for @ExampleFC!",
             attachments={"media_keys": ["mk_q1"]},
             entities={"urls": []},
         )
@@ -593,7 +593,7 @@ class TestNoteTweets:
         qt = tweets[0].quoted_tweet
         assert qt is not None
         assert qt.id == "999"
-        assert qt.text == "3 goals for @SJEarthquakes!"
+        assert qt.text == "3 goals for @ExampleFC!"
         assert len(qt.media) == 1
         assert qt.media[0].url == "https://pbs.twimg.com/media/quoted.jpg"
         assert qt.media[0].type == "photo"

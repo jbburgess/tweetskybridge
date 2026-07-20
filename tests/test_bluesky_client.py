@@ -420,7 +420,7 @@ class TestBuildQuoteEmbedCard:
         client = BlueskyClient()
         quoted = Tweet(
             id="999",
-            text="3 goals for @SJEarthquakes!",
+            text="3 goals for @ExampleFC!",
         )
         tweet = Tweet(
             id="1000",
@@ -438,7 +438,7 @@ class TestBuildQuoteEmbedCard:
         assert card is not None
         assert card.external.uri == "https://twitter.com/MLS/status/999"
         assert card.external.title == "@MLS"
-        assert card.external.description == "3 goals for @SJEarthquakes!"
+        assert card.external.description == "3 goals for @ExampleFC!"
         assert card.external.thumb is None
 
     @patch("bot.bluesky_client.download_image", return_value=b"\xff\xd8fake-jpg")

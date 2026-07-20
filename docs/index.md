@@ -6,7 +6,7 @@ permalink: /
 
 A Python bot that mirrors tweets from a Twitter (X) account to a corresponding Bluesky account, with rich support for embedded media, quote tweets, reply threads, and more.
 
-See the full source code and usage instructions on [GitHub](https://github.com/jbburgess/bskybot-sjearthquakes).
+See the full source code and usage instructions on [GitHub](https://github.com/jbburgess/tweetskybridge).
 
 ---
 

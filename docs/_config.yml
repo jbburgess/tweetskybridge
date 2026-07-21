@@ -1,8 +1,8 @@
 title: TweetSkyBridge
-remote_theme: jekyll/minima
-plugins:
-- jekyll-remote-theme
-minima:
+theme: minima
+# Project site is served under /tweetskybridge on the custom domain.
+url: "https://jonathanburgess.dev"
+baseurl: "/tweetskybridge"
 minima:
   hide_site_feed_link: true
   skin: dark

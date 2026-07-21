@@ -1,6 +1,7 @@
 title: TweetSkyBridge
-theme: minima
-# Project site is served under /tweetskybridge on the custom domain.
+remote_theme: jekyll/minima
+plugins:
+  - jekyll-remote-theme
 url: "https://jonathanburgess.dev"
 baseurl: "/tweetskybridge"
 minima:
@@ -16,6 +17,5 @@ minima:
     - title: LinkedIn
       icon: linkedin
       url: "https://linkedin.jonathanburgess.dev"
-author:
-  name: Jonathan Burgess
-  email: "mail@jonathanburgess.dev"
+author: Jonathan Burgess
+email: "mail@jonathanburgess.dev"

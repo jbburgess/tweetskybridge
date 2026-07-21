@@ -169,7 +169,7 @@ def fetch_og_metadata(url: str) -> dict[str, str]:
         resp = requests.get(
             url,
             timeout=config.cfg.HTTP_TIMEOUT,
-            headers={"User-Agent": "bskybot/1.0 (link-card preview)"},
+            headers={"User-Agent": "tweetskybridge/1.0 (link-card preview)"},
         )
         resp.raise_for_status()
     except requests.RequestException:

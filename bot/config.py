@@ -20,16 +20,19 @@ class Config:
     BLUESKY_SESSION: str = ""
 
     # File used to persist seen tweet IDs (committed back to the repo by CI)
-    STATE_FILE: str = "seen_ids.json"
+    STATE_FILE: str = "id_map.json"
 
     # Maximum number of seen IDs to keep (prevents unbounded growth)
     MAX_SEEN_IDS: int = 100
 
+    # Maximum number of recent tweets to fetch per run
+    TWITTER_MAX_RESULTS: int = 5
+
     # Maximum image download size in bytes (5 MB)
     MAX_IMAGE_BYTES: int = 5 * 1024 * 1024
 
-    # Maximum video download size in bytes (50 MB — Bluesky limit)
-    MAX_VIDEO_BYTES: int = 50 * 1024 * 1024
+    # Maximum video download size in bytes (100 MB — Bluesky limit)
+    MAX_VIDEO_BYTES: int = 100 * 1024 * 1024
 
     # HTTP timeout for media / OG-metadata fetches (seconds)
     HTTP_TIMEOUT: int = 15
@@ -39,6 +42,9 @@ class Config:
 
     # Bluesky grapheme limit
     BLUESKY_GRAPHEME_LIMIT: int = 300
+
+    # Whether to mirror the Twitter pinned tweet to the Bluesky pinned post
+    PIN_SYNC_ENABLED: bool = True
 
 
 cfg = Config()
@@ -63,3 +69,11 @@ def load() -> None:
         sys.exit(1)
 
     cfg.BLUESKY_SESSION = os.environ.get("BLUESKY_SESSION", "")
+
+    pin_sync = os.environ.get("PIN_SYNC_ENABLED")
+    if pin_sync is not None:
+        cfg.PIN_SYNC_ENABLED = pin_sync.strip().lower() in ("1", "true", "yes", "on")
+
+    max_results = os.environ.get("TWITTER_MAX_RESULTS")
+    if max_results is not None:
+        cfg.TWITTER_MAX_RESULTS = int(max_results)

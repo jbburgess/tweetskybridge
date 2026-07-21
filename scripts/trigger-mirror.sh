@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="jbburgess/bskybot-sjearthquakes"
+REPO="jbburgess/tweetskybridge"
 WORKFLOW="run-mirror.yml"
 REF="master"
 

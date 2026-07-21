@@ -112,8 +112,8 @@ class TestResolveUrls:
             text="wow https://t.co/xyz",
             urls=[{
                 "url": "https://t.co/xyz",
-                "expanded_url": "https://x.com/SJEarthquakes/status/888",
-                "display_url": "x.com/SJEarthquakes/status/888",
+                "expanded_url": "https://x.com/ExampleFC/status/888",
+                "display_url": "x.com/ExampleFC/status/888",
             }],
             quoted_tweet=quoted,
         )
@@ -300,7 +300,7 @@ class TestHashtagRegex:
         assert _HASHTAG_RE.findall("Hello #MLS") == ["MLS"]
 
     def test_multiple_hashtags(self) -> None:
-        assert _HASHTAG_RE.findall("#Quakes74 and #MLS") == ["Quakes74", "MLS"]
+        assert _HASHTAG_RE.findall("#ExampleFC and #MLS") == ["ExampleFC", "MLS"]
 
     def test_hashtag_with_unicode(self) -> None:
         assert _HASHTAG_RE.findall("#Göteborg") == ["Göteborg"]
@@ -317,28 +317,28 @@ class TestHashtagRegex:
         assert _HASHTAG_RE.findall("#GameDay is here") == ["GameDay"]
 
     def test_hashtag_only(self) -> None:
-        assert _HASHTAG_RE.findall("#SJvLAFC") == ["SJvLAFC"]
+        assert _HASHTAG_RE.findall("#ExampleFCvRival") == ["ExampleFCvRival"]
 
 
 class TestBuildTextBuilderHashtags:
     def test_single_hashtag_produces_tag_facet(self) -> None:
-        tweet = Tweet(id="300", text="Go Quakes! #SJvLAFC")
-        tb = build_text_builder("Go Quakes! #SJvLAFC", tweet)
-        assert tb.build_text() == "Go Quakes! #SJvLAFC"
+        tweet = Tweet(id="300", text="Go ExampleFC! #ExampleFCvRival")
+        tb = build_text_builder("Go ExampleFC! #ExampleFCvRival", tweet)
+        assert tb.build_text() == "Go ExampleFC! #ExampleFCvRival"
         facets = tb.build_facets()
         assert facets is not None
         assert len(facets) == 1
-        assert facets[0].features[0].tag == "SJvLAFC"
+        assert facets[0].features[0].tag == "ExampleFCvRival"
 
     def test_multiple_hashtags(self) -> None:
-        tweet = Tweet(id="301", text="#Quakes74 let's go #MLS")
-        tb = build_text_builder("#Quakes74 let's go #MLS", tweet)
-        assert tb.build_text() == "#Quakes74 let's go #MLS"
+        tweet = Tweet(id="301", text="#ExampleFC let's go #MLS")
+        tb = build_text_builder("#ExampleFC let's go #MLS", tweet)
+        assert tb.build_text() == "#ExampleFC let's go #MLS"
         facets = tb.build_facets()
         assert facets is not None
         assert len(facets) == 2
         tags = [f.features[0].tag for f in facets]
-        assert "Quakes74" in tags
+        assert "ExampleFC" in tags
         assert "MLS" in tags
 
     def test_hashtag_and_url_together(self) -> None:

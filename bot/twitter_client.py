@@ -34,6 +34,33 @@ class TwitterClient:
         log.info("Resolved @%s → user ID %s (cached)", config.cfg.TWITTER_HANDLE, user_id)
         return user_id
 
+    def fetch_pinned_tweet_id(self) -> str | None:
+        """Return the account's currently-pinned tweet ID, or None.
+
+        The pinned tweet is exposed as a user-object field, so this is a
+        separate call from :meth:`fetch_recent_tweets`.  Transient API errors
+        are swallowed (returning None) so a failed lookup simply skips the
+        pinned-post sync for this run.
+        """
+        user_id = self._resolve_user_id()
+
+        try:
+            resp: Response = self._client.get_user(  # type: ignore[assignment]
+                id=user_id, user_fields=["pinned_tweet_id"],
+            )
+        except tweepy.TooManyRequests:
+            log.warning("Hit Twitter rate limit fetching pinned tweet, skipping")
+            return None
+        except tweepy.errors.Forbidden:
+            log.warning("Twitter API returned 403 Forbidden fetching pinned tweet, skipping")
+            return None
+
+        if resp.data is None:
+            return None
+
+        pinned = getattr(resp.data, "pinned_tweet_id", None)
+        return str(pinned) if pinned else None
+
     def fetch_recent_tweets(self, max_results: int = 5) -> list[Tweet]:
         """Fetch recent original tweets (no retweets/replies) with media metadata."""
         user_id = self._resolve_user_id()

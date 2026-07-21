@@ -1,12 +1,9 @@
 title: TweetSkyBridge
-remote_theme: jekyll/minima
-plugins:
-  - jekyll-remote-theme
+theme: minima
 url: "https://jonathanburgess.dev"
 baseurl: "/tweetskybridge"
 minima:
   hide_site_feed_link: true
-  skin: dark
   social_links:
     - title: BlueSky
       icon: bluesky

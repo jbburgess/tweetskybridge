@@ -1,6 +1,6 @@
 ---
 layout: default
-title: STwitter to Bluesky Repost Bot
+title: Twitter to Bluesky Repost Bot
 permalink: /
 ---
 

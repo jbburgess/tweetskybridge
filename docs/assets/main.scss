@@ -41,6 +41,18 @@ h6,
   color: #e5e7eb;
 }
 
+.site-title:visited,
+.page-link:visited {
+  color: #e5e7eb;
+}
+
+.site-title:hover,
+.page-link:hover,
+.site-title:focus,
+.page-link:focus {
+  color: #f9fafb;
+}
+
 code,
 pre {
   background-color: #1f2937;
@@ -50,4 +62,26 @@ pre {
 blockquote {
   color: #d1d5db;
   border-left-color: #4b5563;
+}
+
+table {
+  background-color: #0f172a;
+}
+
+th {
+  background-color: #1f2937;
+  color: #f3f4f6;
+}
+
+td {
+  color: #e5e7eb;
+  background-color: #111827;
+}
+
+tbody tr:nth-child(even) td {
+  background-color: #1f2937;
+}
+
+tbody tr:nth-child(odd) td {
+  background-color: #111827;
 }

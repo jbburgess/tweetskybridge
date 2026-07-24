@@ -22,3 +22,4 @@ class Tweet:
     reply_to_tweet_id: str | None = None  # Set for self-reply threads; Twitter ID of the parent tweet
     conversation_id: str | None = None    # Twitter ID of the thread root (equals id for standalone posts)
     quoted_tweet: Tweet | None = None     # Populated when this tweet quotes another tweet
+    edit_history_tweet_ids: list[str] = field(default_factory=list)  # All IDs in edit chain, oldest first

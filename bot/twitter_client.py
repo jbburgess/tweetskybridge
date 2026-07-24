@@ -207,6 +207,9 @@ class TwitterClient:
                 reply_to_tweet_id=reply_to_tweet_id,
                 conversation_id=str(getattr(t, "conversation_id", None) or t.id),
                 quoted_tweet=quoted_tweet,
+                edit_history_tweet_ids=[
+                    str(eid) for eid in (getattr(t, "edit_history_tweet_ids", None) or [])
+                ],
             ))
 
         log.info("Fetched %d tweets from @%s", len(tweets), config.cfg.TWITTER_HANDLE)

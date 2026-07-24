@@ -46,6 +46,9 @@ class Config:
     # Whether to mirror the Twitter pinned tweet to the Bluesky pinned post
     PIN_SYNC_ENABLED: bool = True
 
+    # Whether to delete the original Bluesky post when a mirrored tweet is edited
+    EDIT_SYNC_ENABLED: bool = True
+
 
 cfg = Config()
 
@@ -73,6 +76,10 @@ def load() -> None:
     pin_sync = os.environ.get("PIN_SYNC_ENABLED")
     if pin_sync is not None:
         cfg.PIN_SYNC_ENABLED = pin_sync.strip().lower() in ("1", "true", "yes", "on")
+
+    edit_sync = os.environ.get("EDIT_SYNC_ENABLED")
+    if edit_sync is not None:
+        cfg.EDIT_SYNC_ENABLED = edit_sync.strip().lower() in ("1", "true", "yes", "on")
 
     max_results = os.environ.get("TWITTER_MAX_RESULTS")
     if max_results is not None:

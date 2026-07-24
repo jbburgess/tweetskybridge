@@ -180,6 +180,13 @@ class BlueskyClient:
         else:
             log.info("Cleared Bluesky pinned post")
 
+    def delete_post(self, uri: str) -> None:
+        """Delete a Bluesky post by its AT URI."""
+        if not self._logged_in:
+            self.login()
+        self._client.delete_post(uri)
+        log.info("Deleted Bluesky post %s", uri)
+
     # ------------------------------------------------------------------
     # Posting
     # ------------------------------------------------------------------

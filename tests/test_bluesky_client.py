@@ -416,11 +416,13 @@ class TestBuildLinkCard:
 
 
 class TestBuildQuoteEmbedCard:
-    def test_builds_card_with_username_and_description(self) -> None:
+    def test_builds_card_with_display_name_and_handle(self) -> None:
         client = BlueskyClient()
         quoted = Tweet(
             id="999",
             text="3 goals for @ExampleFC!",
+            author_name="Display Name",
+            author_username="handle",
         )
         tweet = Tweet(
             id="1000",
@@ -437,9 +439,32 @@ class TestBuildQuoteEmbedCard:
 
         assert card is not None
         assert card.external.uri == "https://twitter.com/MLS/status/999"
-        assert card.external.title == "@MLS"
+        assert card.external.title == "Display Name (@handle)"
         assert card.external.description == "3 goals for @ExampleFC!"
         assert card.external.thumb is None
+
+    def test_falls_back_to_handle_when_display_name_unavailable(self) -> None:
+        client = BlueskyClient()
+        quoted = Tweet(
+            id="999",
+            text="3 goals for @ExampleFC!",
+            author_username="handle",
+        )
+        tweet = Tweet(
+            id="1000",
+            text="bringing home",
+            urls=[{
+                "url": "https://t.co/abc",
+                "expanded_url": "https://twitter.com/handle/status/999",
+                "display_url": "twitter.com/handle/status/999",
+            }],
+            quoted_tweet=quoted,
+        )
+
+        card = client._build_quote_embed_card(tweet)
+
+        assert card is not None
+        assert card.external.title == "@handle"
 
     @patch("bot.bluesky_client.download_image", return_value=b"\xff\xd8fake-jpg")
     def test_builds_card_with_thumbnail_from_quoted_media(self, mock_dl: MagicMock) -> None:
@@ -485,14 +510,14 @@ class TestBuildQuoteEmbedCard:
     def test_link_card_delegates_to_quote_embed_card(self) -> None:
         """_build_link_card routes to _build_quote_embed_card for quote tweets."""
         client = BlueskyClient()
-        quoted = Tweet(id="999", text="quoted text")
+        quoted = Tweet(id="999", text="quoted text", author_name="Display Name", author_username="handle")
         tweet = Tweet(
             id="1000",
             text="quoting",
             urls=[{
                 "url": "https://t.co/abc",
-                "expanded_url": "https://twitter.com/MLS/status/999",
-                "display_url": "twitter.com/MLS/status/999",
+                "expanded_url": "https://twitter.com/handle/status/999",
+                "display_url": "twitter.com/handle/status/999",
             }],
             quoted_tweet=quoted,
         )
@@ -500,8 +525,8 @@ class TestBuildQuoteEmbedCard:
         card = client._build_link_card(tweet)
 
         assert card is not None
-        assert card.external.uri == "https://twitter.com/MLS/status/999"
-        assert card.external.title == "@MLS"
+        assert card.external.uri == "https://twitter.com/handle/status/999"
+        assert card.external.title == "Display Name (@handle)"
 
 
 class TestPost:

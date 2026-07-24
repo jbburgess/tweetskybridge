@@ -574,6 +574,7 @@ class TestNoteTweets:
             text="3 goals for @ExampleFC!",
             attachments={"media_keys": ["mk_q1"]},
             entities={"urls": []},
+            author_id=777,
         )
         main_tweet = _make_tweepy_tweet(
             tweet_id=1000,
@@ -584,7 +585,11 @@ class TestNoteTweets:
 
         client._client.get_users_tweets.return_value = SimpleNamespace(
             data=[main_tweet],
-            includes={"media": [quoted_media], "tweets": [quoted_obj]},
+            includes={
+                "media": [quoted_media],
+                "tweets": [quoted_obj],
+                "users": [SimpleNamespace(id=777, name="Display Name", username="handle")],
+            },
         )
 
         tweets = client.fetch_recent_tweets()
@@ -597,6 +602,8 @@ class TestNoteTweets:
         assert len(qt.media) == 1
         assert qt.media[0].url == "https://pbs.twimg.com/media/quoted.jpg"
         assert qt.media[0].type == "photo"
+        assert qt.author_name == "Display Name"
+        assert qt.author_username == "handle"
 
     @patch("bot.twitter_client.save_twitter_user_id")
     @patch("bot.twitter_client.load_twitter_user_id", return_value="12345")

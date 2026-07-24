@@ -533,11 +533,7 @@ class BlueskyClient:
         if not target_url:
             return None
 
-        # Parse "@username" from URL: https://twitter.com/username/status/123 → "@username"
-        try:
-            title = "@" + target_url.split("/")[3]
-        except IndexError:
-            title = target_url
+        title = self._format_twitter_account_title(target_url, quoted)
 
         description = quoted.text
 
@@ -559,3 +555,25 @@ class BlueskyClient:
                 thumb=thumb,
             )
         )
+
+    @staticmethod
+    def _format_twitter_account_title(target_url: str, tweet: Tweet) -> str:
+        """Format a Twitter account title like "Name (@handle)".
+
+        Falls back to "@handle" when no display name is available and finally
+        to the URL if parsing fails.
+        """
+        username = tweet.author_username.strip().lstrip("@")
+        if not username:
+            try:
+                username = target_url.split("/")[3].strip().lstrip("@")
+            except IndexError:
+                return target_url
+
+        display_name = tweet.author_name.strip()
+        if display_name:
+            if display_name.casefold() == username.casefold():
+                return f"@{username}"
+            return f"{display_name} (@{username})"
+
+        return f"@{username}"

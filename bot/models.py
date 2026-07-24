@@ -19,6 +19,8 @@ class Tweet:
     text: str
     media: list[MediaItem] = field(default_factory=list)
     urls: list[dict[str, str]] = field(default_factory=list)  # [{url, expanded_url, display_url}]
+    author_name: str = ""
+    author_username: str = ""
     reply_to_tweet_id: str | None = None  # Set for self-reply threads; Twitter ID of the parent tweet
     conversation_id: str | None = None    # Twitter ID of the thread root (equals id for standalone posts)
     quoted_tweet: Tweet | None = None     # Populated when this tweet quotes another tweet

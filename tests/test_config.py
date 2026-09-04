@@ -36,9 +36,8 @@ class TestLoad:
         # Ensure the var is not set from a previous test
         clean_env = {k: v for k, v in env.items()}
 
-        with patch.dict(os.environ, clean_env, clear=True):
-            with pytest.raises(SystemExit):
-                config.load()
+        with patch.dict(os.environ, clean_env, clear=True), pytest.raises(SystemExit):
+            config.load()
 
     def test_exits_on_empty_required_var(self) -> None:
         env = {
@@ -47,9 +46,8 @@ class TestLoad:
             "BLUESKY_HANDLE": "bsky.social",
             "BLUESKY_PASSWORD": "pass",
         }
-        with patch.dict(os.environ, env, clear=True):
-            with pytest.raises(SystemExit):
-                config.load()
+        with patch.dict(os.environ, env, clear=True), pytest.raises(SystemExit):
+            config.load()
 
     def test_optional_session_loaded(self) -> None:
         env = {

@@ -5,12 +5,25 @@ import time
 from dataclasses import dataclass
 
 import httpx
+import requests
 from atproto import Client, models
-from atproto_client.exceptions import BadRequestError, InvokeTimeoutError, NetworkError, RequestException
+from atproto_client.exceptions import (
+    BadRequestError,
+    InvokeTimeoutError,
+    NetworkError,
+    RequestException,
+)
 from atproto_client.request import Request
 
 from bot import config
-from bot.media import download_image, download_video, fetch_og_metadata, get_image_dimensions, get_video_dimensions, select_best_variant
+from bot.media import (
+    download_image,
+    download_video,
+    fetch_og_metadata,
+    get_image_dimensions,
+    get_video_dimensions,
+    select_best_variant,
+)
 from bot.models import MediaItem, Tweet
 from bot.text import build_text_builder, resolve_urls, split_text_for_thread
 from bot.urls import is_twitter_photo_url, is_twitter_status_url
@@ -123,7 +136,7 @@ class BlueskyClient:
                 self._logged_in = True
                 log.info("Logged in to Bluesky via session string")
                 return
-            except Exception:
+            except (BadRequestError, InvokeTimeoutError, NetworkError, RequestException):
                 log.warning("Session string login failed, falling back to password")
 
         self._client.login(config.cfg.BLUESKY_HANDLE, config.cfg.BLUESKY_PASSWORD)
@@ -180,6 +193,13 @@ class BlueskyClient:
         else:
             log.info("Cleared Bluesky pinned post")
 
+    def delete_post(self, uri: str) -> None:
+        """Delete a Bluesky post by its AT URI."""
+        if not self._logged_in:
+            self.login()
+        self._client.delete_post(uri)
+        log.info("Deleted Bluesky post %s", uri)
+
     # ------------------------------------------------------------------
     # Posting
     # ------------------------------------------------------------------
@@ -209,8 +229,8 @@ class BlueskyClient:
     ) -> PostedThread:
         """Create a Bluesky post (or reply thread) from a Tweet.
 
-        Long tweets are split into a chain of reply posts with ``(k/n)``
-        suffixes.  Media is attached to the first post only.  When
+        Long tweets are split into a chain of reply posts (Bluesky numbers
+        threaded posts itself).  Media is attached to the first post only.  When
         *quoted_ref* is supplied (a self-quote whose target the bot already
         mirrored), the first post embeds that Bluesky record natively instead
         of a link card.  Returns the root (first) and tip (last) post refs so
@@ -269,7 +289,7 @@ class BlueskyClient:
                             prev_ref = ref
                             video_on_main = True
                             continue
-                        except Exception:
+                        except (BadRequestError, InvokeTimeoutError, NetworkError, RequestException):
                             log.warning("Bluesky rejected video for tweet %s, falling back to link card", tweet.id)
 
                     embed = self._build_first_embed(tweet, quoted_ref)
@@ -311,7 +331,7 @@ class BlueskyClient:
                     log.info("Posted video reply to Bluesky for tweet %s", tweet.id)
                     ref = BlueskyPostRef(uri=str(result.uri), cid=str(result.cid))
                     prev_ref = ref
-                except Exception:
+                except (BadRequestError, InvokeTimeoutError, NetworkError, RequestException):
                     log.warning("Failed to post video reply for tweet %s, skipping", tweet.id)
 
         assert first_ref is not None  # a post is always created above
@@ -382,7 +402,7 @@ class BlueskyClient:
         for item in photos[:4]:  # Bluesky limit
             try:
                 data = download_image(item.url)
-            except Exception:
+            except (requests.RequestException, ValueError):
                 log.warning("Failed to download image %s, skipping", item.url)
                 continue
 
@@ -394,7 +414,7 @@ class BlueskyClient:
                     item.url, len(data),
                 )
                 continue
-            except Exception:
+            except (BadRequestError, NetworkError, RequestException):
                 log.warning(
                     "Failed to upload image %s (%d bytes), skipping",
                     item.url, len(data), exc_info=True,
@@ -432,7 +452,7 @@ class BlueskyClient:
         return self._prepare_single_video(videos[0])
 
     @staticmethod
-    def _prepare_single_video(item: "MediaItem") -> tuple[bytes | None, str, int, int]:
+    def _prepare_single_video(item: MediaItem) -> tuple[bytes | None, str, int, int]:
         """Download a single video/GIF *item*.
 
         Returns ``(video_bytes, alt_text, width, height)`` on success or
@@ -445,7 +465,7 @@ class BlueskyClient:
 
         try:
             data = download_video(variant["url"])
-        except Exception:
+        except (requests.RequestException, ValueError):
             log.warning("Failed to download video %s", variant.get("url", "?"))
             return None, "", 0, 0
 
@@ -493,7 +513,7 @@ class BlueskyClient:
             try:
                 img_bytes = download_image(og["image"])
                 thumb = self._client.upload_blob(img_bytes).blob
-            except Exception:
+            except (BadRequestError, InvokeTimeoutError, NetworkError, RequestException, requests.RequestException, ValueError):
                 log.warning("Failed to download OG image for %s", target_url)
 
         return models.AppBskyEmbedExternal.Main(
@@ -526,11 +546,7 @@ class BlueskyClient:
         if not target_url:
             return None
 
-        # Parse "@username" from URL: https://twitter.com/username/status/123 → "@username"
-        try:
-            title = "@" + target_url.split("/")[3]
-        except IndexError:
-            title = target_url
+        title = self._format_twitter_account_title(target_url, quoted)
 
         description = quoted.text
 
@@ -541,7 +557,7 @@ class BlueskyClient:
             try:
                 img_bytes = download_image(photos[0].url)
                 thumb = self._client.upload_blob(img_bytes).blob
-            except Exception:
+            except (BadRequestError, InvokeTimeoutError, NetworkError, RequestException, requests.RequestException, ValueError):
                 log.warning("Failed to download quoted tweet thumbnail for %s", target_url)
 
         return models.AppBskyEmbedExternal.Main(
@@ -552,3 +568,25 @@ class BlueskyClient:
                 thumb=thumb,
             )
         )
+
+    @staticmethod
+    def _format_twitter_account_title(target_url: str, tweet: Tweet) -> str:
+        """Format a Twitter account title like "Name (@handle)".
+
+        Falls back to "@handle" when no display name is available and finally
+        to the URL if parsing fails.
+        """
+        username = tweet.author_username.strip().lstrip("@")
+        if not username:
+            try:
+                username = target_url.split("/")[3].strip().lstrip("@")
+            except IndexError:
+                return target_url
+
+        display_name = tweet.author_name.strip()
+        if display_name:
+            if display_name.casefold() == username.casefold():
+                return f"@{username}"
+            return f"{display_name} (@{username})"
+
+        return f"@{username}"

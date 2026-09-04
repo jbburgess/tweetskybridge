@@ -6,7 +6,14 @@ import pytest
 import requests
 
 from bot import config
-from bot.media import download_image, download_video, fetch_og_metadata, get_image_dimensions, get_video_dimensions, select_best_variant
+from bot.media import (
+    download_image,
+    download_video,
+    fetch_og_metadata,
+    get_image_dimensions,
+    get_video_dimensions,
+    select_best_variant,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -200,6 +207,7 @@ class TestSelectBestVariant:
 class TestGetImageDimensions:
     def test_returns_correct_dimensions(self) -> None:
         import io
+
         from PIL import Image as PILImage
 
         buf = io.BytesIO()

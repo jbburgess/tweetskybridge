@@ -229,10 +229,7 @@ def run_loop(args: argparse.Namespace) -> None:
             raise
         except Exception:
             log.exception("Iteration failed; will retry after interval.")
-        try:
-            time.sleep(args.interval)
-        except KeyboardInterrupt:
-            raise
+        time.sleep(args.interval)
 
 
 def main(argv: list[str] | None = None) -> int:

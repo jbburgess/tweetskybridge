@@ -20,8 +20,13 @@ A Python bot that mirrors tweets from a Twitter (X) account to a corresponding B
   - **Cross-run reply threading** — self-reply tweets chain under the mapped Bluesky post even when the parent was posted in an earlier run
   - **Native quote embeds** — self-quote tweets embed the bot's existing Bluesky post (`app.bsky.embed.record`) instead of an external link card back to Twitter
   - **Mirrors the Twitter account's pinned tweet to Bluesky** once per day (first run after UTC midnight): pins the mapped post, replaces it when the pin changes, and unpins when Twitter has no pinned tweet (a pinned tweet older than the mapping is skipped with a warning). Disable with `PIN_SYNC_ENABLED=false`.
+- **Handles edited tweets**
+  - Detects when a newly-fetched tweet is an edited version of one already mirrored (via Twitter's edit history IDs), deletes the stale Bluesky post, and mirrors the updated text/media in its place
+  - Preserves thread continuity: if the original Bluesky post already has downstream replies (mirrored previously or appearing in the same run), the edit is skipped with a warning rather than orphaning the reply chain
+  - Disable with `EDIT_SYNC_ENABLED=false`
 - **Rich text feature support**
   - Creates rich link-card embeds (`app.bsky.embed.external`) for tweets that contain URLs but no media (only one embed allowed)
+  - Titles quote-tweet link cards with the source account's display name and handle (e.g. `Example Name (@example)`)
   - Applies clickable link facets to URLs in post text
   - Resolves t.co short URLs to their expanded form, avoiding redirects through Twitter
 - **API call efficiency and graceful degradation**
@@ -86,7 +91,7 @@ A Python bot that mirrors tweets from a Twitter (X) account to a corresponding B
 | Local dev | [python-dotenv](https://pypi.org/project/python-dotenv/) (`.env` file support) |
 | Testing | [pytest](https://pypi.org/project/pytest/) + [pytest-cov](https://pypi.org/project/pytest-cov/) |
 | Linting / quality | [ruff](https://pypi.org/project/ruff/) + [yamllint](https://pypi.org/project/yamllint/) + [check-jsonschema](https://pypi.org/project/check-jsonschema/) |
-| CI / Scheduling | GitHub Actions + cron |
+| CI / Scheduling | GitHub Actions (optional local cron), local script (`scripts/run_mirror_local.py`) |
 
 ---
 
@@ -138,6 +143,7 @@ The bot reads credentials from environment variables. For local development, cre
 | `BLUESKY_PASSWORD` | Yes | Bluesky App Password (recommended) or account password |
 | `BLUESKY_SESSION` | No | Exported session string for token-based re-auth |
 | `PIN_SYNC_ENABLED` | No | Mirror the Twitter pinned tweet to the Bluesky pinned post (default `true`; set `false` to disable) |
+| `EDIT_SYNC_ENABLED` | No | Replace the mirrored Bluesky post when a tweet is edited (default `true`; set `false` to disable) |
 
 ### Local `.env` example
 
@@ -267,27 +273,28 @@ Add the following line to schedule runs every 10 minutes during hours 7–21 (7:
 
 ---
 
-## How It Works
+## How It Works / Process Flow
 
 1. **Startup and config load** — `main.py` initializes logging, loads `.env` (for local runs), and validates required settings in `bot/config.py`.
-2. **State bootstrap** — `bot/state.py` loads `id_map.json` and normalizes legacy formats into the current tweet→post map (`posts`). This map stores both the first Bluesky post (`root`) and most recent post (`tip`) produced for each tweet, plus cached Twitter user ID and pin-sync metadata.
+2. **State bootstrap** — `bot/state.py` loads `id_map.json` and normalizes legacy formats into the current tweet→post map (`posts`). This map stores both the first Bluesky post (`root`) and most recent post (`tip`) produced for each tweet, the parent tweet ID (`reply_to`) when the tweet was a self-reply, plus cached Twitter user ID and pin-sync metadata.
 3. **Client auth** — `TwitterClient` and `BlueskyClient` are initialized. Bluesky login prefers `BLUESKY_SESSION` when present, then falls back to handle/password. Transient login failures are retried with backoff.
-4. **Twitter fetch and enrichment** — `TwitterClient.fetch_recent_tweets()` resolves the account's numeric user ID (cached after first lookup), fetches recent tweets through API v2, excludes retweets and replies to other accounts by default, includes media expansions, and hydrates quote-tweet payloads when present.
+4. **Twitter fetch and enrichment** — `TwitterClient.fetch_recent_tweets()` resolves the account's numeric user ID (cached after first lookup), fetches recent tweets through API v2, excludes retweets and replies to other accounts by default, includes media expansions, hydrates quote-tweet payloads (including the quoted author's name and handle) when present, and records each tweet's edit history IDs.
 5. **Chronological processing and dedupe** — Tweets are processed oldest→newest so reply chains remain ordered. Each tweet ID is checked against the persisted map; already-seen tweets are skipped.
-6. **Thread context resolution** — For self-replies, the bot looks up the parent tweet in the persisted map and replies to that mapped Bluesky `tip`, while preserving the conversation `root`. If the parent is unmapped (for example, too old), the tweet is posted standalone with a warning.
-7. **Quote behavior selection** — For self-quotes whose target tweet is already mapped, the bot uses a native Bluesky record embed (`app.bsky.embed.record`) instead of a link card (to the external quoted Tweet). Unmapped quotes fall back to external-card behavior.
-8. **Text normalization and split logic** — `bot/text.py` expands t.co links, removes Twitter media/status links that would be redundant in Bluesky embeds, unescapes entities, and splits text that exceeds 300 graphemes into threaded chunks with ` (k/n)` suffixes.
-9. **Embed and media strategy** — `BlueskyClient` builds the first post's embed with Bluesky constraints in mind:
+6. **Edit detection** — If `EDIT_SYNC_ENABLED=true` and a tweet's edit history contains an ID that was already mirrored, the bot deletes that stale Bluesky post and mirrors the edited version as a new post. If the original has downstream replies — either previously mirrored or present in the same fetch batch — the deletion would orphan the chain, so the edit is marked as seen and skipped with a warning. Deletion failures are logged and the edit is still mirrored.
+7. **Thread context resolution** — For self-replies, the bot looks up the parent tweet in the persisted map and replies to that mapped Bluesky `tip`, while preserving the conversation `root`. If the parent is unmapped (for example, too old), the tweet is posted standalone with a warning.
+8. **Quote behavior selection** — For self-quotes whose target tweet is already mapped, the bot uses a native Bluesky record embed (`app.bsky.embed.record`) instead of a link card (to the external quoted Tweet). Unmapped quotes fall back to an external card titled with the quoted account's display name and handle.
+9. **Text normalization and split logic** — `bot/text.py` expands t.co links, removes Twitter media/status links that would be redundant in Bluesky embeds, unescapes entities, and splits text that exceeds 300 graphemes into threaded chunks (Bluesky numbers threaded posts automatically).
+10. **Embed and media strategy** — `BlueskyClient` builds the first post's embed with Bluesky constraints in mind:
   - Image tweets: uploads up to 4 photos, preserving alt text and aspect ratio.
   - Video/GIF tweets: attempts a native video post (with aspect ratio metadata).
   - Mixed media (images + videos): posts images on the main post, then uploads each video as follow-up replies.
   - URL-only tweets: builds one external link card from Open Graph metadata.
   - Video failure fallback: if video upload is rejected, the tweet can still publish with text/link-card fallback.
-10. **Rich text facets and posting** — URL facets (and hashtag tag facets) are applied to the post text. Long tweets are published as a reply chain where only the first segment carries embeds/media; downstream segments continue the same Bluesky thread.
-11. **Resilience and graceful degradation** — The pipeline tolerates partial failures: rate-limited Twitter fetches skip the run cleanly; individual image/video failures are logged and skipped; persistent media upload problems degrade to text/link-card posting when possible.
-12. **Mapping persistence** — After successful posts, the tweet→post map is updated and saved back to `id_map.json`, capped to the newest 100 tweet IDs. This persisted mapping enables cross-run reply threading and native self-quote embeds.
-13. **Daily pinned-post reconcile** — If `PIN_SYNC_ENABLED=true`, the bot runs pinned-post sync once per UTC day (first run after midnight): it mirrors Twitter's current pinned tweet to Bluesky using the mapping, replaces changed pins, unpins when Twitter has no pinned tweet, and skips unmapped pinned tweets with a warning.
-14. **Commit/push behavior by runtime** — In GitHub Actions, updated `id_map.json` is committed only when changed. In fully local mode (`scripts/run_mirror_local.py`), the same commit/push behavior is available with flags to control commit, push, interval, and loop mode.
+11. **Rich text facets and posting** — URL facets (and hashtag tag facets) are applied to the post text. Long tweets are published as a reply chain where only the first segment carries embeds/media; downstream segments continue the same Bluesky thread.
+12. **Resilience and graceful degradation** — The pipeline tolerates partial failures: rate-limited Twitter fetches skip the run cleanly; individual image/video failures are logged and skipped; persistent media upload problems degrade to text/link-card posting when possible.
+13. **Mapping persistence** — After successful posts, the tweet→post map is updated and saved back to `id_map.json`, capped to the newest 100 tweet IDs. This persisted mapping enables cross-run reply threading, edit detection, and native self-quote embeds.
+14. **Daily pinned-post reconcile** — If `PIN_SYNC_ENABLED=true`, the bot runs pinned-post sync once per UTC day (first run after midnight): it mirrors Twitter's current pinned tweet to Bluesky using the mapping, replaces changed pins, unpins when Twitter has no pinned tweet, and skips unmapped pinned tweets with a warning.
+15. **Commit/push behavior by runtime** — In GitHub Actions, updated `id_map.json` is committed only when changed. In fully local mode (`scripts/run_mirror_local.py`), the same commit/push behavior is available with flags to control commit, push, interval, and loop mode.
 
 ---
 
@@ -323,7 +330,7 @@ See [Configuration](#configuration) for details on where to store and how to use
 > [!WARNING]
 > There is **no free tier** available anymore for Twitter Developer accounts, so any usage at all *will* incur at least minimal costs and you must have available funds or a paid subscription on your Twitter developer account for the bot to work.
 
-Depending on how active the target Twitter account is, costs may vary significantly. Here are some ballpark estimates (these are *not* guaranteed and Twitter may change their pricing model at any time):
+Depending on how active the target Twitter account is, costs may vary significantly. Here are some ballpark estimates as of mid-2026 (these are *not* guaranteed and Twitter may change their pricing model at any time):
 
   | Activity | New tweets/day | Unique post reads/day | Daily | Monthly (~30 days) |
   |---|---|---|---|---|

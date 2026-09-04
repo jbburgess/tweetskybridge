@@ -1,9 +1,19 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 
-from bot.text import _grapheme_len, _HASHTAG_RE, _split_into_chunks, build_text_builder, resolve_urls, split_text_for_thread, truncate
 from bot.models import MediaItem, Tweet
+from bot.text import (
+    _HASHTAG_RE,
+    _grapheme_len,
+    _split_into_chunks,
+    build_text_builder,
+    resolve_urls,
+    split_text_for_thread,
+    truncate,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -261,14 +271,13 @@ class TestSplitTextForThread:
         assert len(parts) == 1
         assert parts[0] == text
 
-    def test_over_limit_splits_with_suffix(self) -> None:
+    def test_over_limit_splits_without_suffix(self) -> None:
         # 62 words of 5 chars separated by spaces = 62*5 + 61 = 371 graphemes
         text = " ".join(["hello"] * 62)
         parts = split_text_for_thread(text)
-        n = len(parts)
-        assert n >= 2
-        for k, part in enumerate(parts, 1):
-            assert part.endswith(f" ({k}/{n})")
+        assert len(parts) >= 2
+        for part in parts:
+            assert not re.search(r" \(\d+/\d+\)$", part)
 
     def test_each_chunk_within_limit(self) -> None:
         text = " ".join(["word"] * 120)  # ~599 graphemes
@@ -276,22 +285,12 @@ class TestSplitTextForThread:
         for part in parts:
             assert _grapheme_len(part) <= 300
 
-    def test_suffix_format_first_and_last(self) -> None:
-        text = " ".join(["hello"] * 62)
-        parts = split_text_for_thread(text)
-        n = len(parts)
-        assert parts[0].endswith(f" (1/{n})")
-        assert parts[-1].endswith(f" ({n}/{n})")
-
     def test_all_words_preserved(self) -> None:
         """Every word in the original text appears in exactly one chunk."""
         words = [f"word{i}" for i in range(80)]  # each 5-6 chars
         text = " ".join(words)
         parts = split_text_for_thread(text)
-        # Strip suffix from each part and rejoin
-        import re
-        stripped_parts = [re.sub(r" \(\d+/\d+\)$", "", p) for p in parts]
-        recovered = " ".join(stripped_parts)
+        recovered = " ".join(parts)
         assert recovered == text
 
 

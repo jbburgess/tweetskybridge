@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 from atproto import models
-from atproto_client.exceptions import BadRequestError, InvokeTimeoutError, NetworkError, RequestException
+from atproto_client.exceptions import (
+    BadRequestError,
+    InvokeTimeoutError,
+    NetworkError,
+    RequestException,
+)
 from atproto_client.models.blob_ref import BlobRef
 
 from bot import config
@@ -53,7 +60,7 @@ class TestLogin:
             nonlocal call_count
             call_count += 1
             if "session_string" in kwargs:
-                raise Exception("expired")
+                raise BadRequestError()
             # password login succeeds (called with positional args)
 
         with patch.object(client._client, "login", side_effect=side_effect):
@@ -279,7 +286,7 @@ class TestBuildImageEmbed:
         assert embed is not None
         assert len(embed.images) == 4
 
-    @patch("bot.bluesky_client.download_image", side_effect=Exception("timeout"))
+    @patch("bot.bluesky_client.download_image", side_effect=requests.ConnectionError("timeout"))
     def test_skips_failed_downloads(self, mock_dl: MagicMock) -> None:
         client = BlueskyClient()
         tweet = Tweet(
@@ -416,11 +423,13 @@ class TestBuildLinkCard:
 
 
 class TestBuildQuoteEmbedCard:
-    def test_builds_card_with_username_and_description(self) -> None:
+    def test_builds_card_with_display_name_and_handle(self) -> None:
         client = BlueskyClient()
         quoted = Tweet(
             id="999",
             text="3 goals for @ExampleFC!",
+            author_name="Display Name",
+            author_username="handle",
         )
         tweet = Tweet(
             id="1000",
@@ -437,9 +446,32 @@ class TestBuildQuoteEmbedCard:
 
         assert card is not None
         assert card.external.uri == "https://twitter.com/MLS/status/999"
-        assert card.external.title == "@MLS"
+        assert card.external.title == "Display Name (@handle)"
         assert card.external.description == "3 goals for @ExampleFC!"
         assert card.external.thumb is None
+
+    def test_falls_back_to_handle_when_display_name_unavailable(self) -> None:
+        client = BlueskyClient()
+        quoted = Tweet(
+            id="999",
+            text="3 goals for @ExampleFC!",
+            author_username="handle",
+        )
+        tweet = Tweet(
+            id="1000",
+            text="bringing home",
+            urls=[{
+                "url": "https://t.co/abc",
+                "expanded_url": "https://twitter.com/handle/status/999",
+                "display_url": "twitter.com/handle/status/999",
+            }],
+            quoted_tweet=quoted,
+        )
+
+        card = client._build_quote_embed_card(tweet)
+
+        assert card is not None
+        assert card.external.title == "@handle"
 
     @patch("bot.bluesky_client.download_image", return_value=b"\xff\xd8fake-jpg")
     def test_builds_card_with_thumbnail_from_quoted_media(self, mock_dl: MagicMock) -> None:
@@ -485,14 +517,14 @@ class TestBuildQuoteEmbedCard:
     def test_link_card_delegates_to_quote_embed_card(self) -> None:
         """_build_link_card routes to _build_quote_embed_card for quote tweets."""
         client = BlueskyClient()
-        quoted = Tweet(id="999", text="quoted text")
+        quoted = Tweet(id="999", text="quoted text", author_name="Display Name", author_username="handle")
         tweet = Tweet(
             id="1000",
             text="quoting",
             urls=[{
                 "url": "https://t.co/abc",
-                "expanded_url": "https://twitter.com/MLS/status/999",
-                "display_url": "twitter.com/MLS/status/999",
+                "expanded_url": "https://twitter.com/handle/status/999",
+                "display_url": "twitter.com/handle/status/999",
             }],
             quoted_tweet=quoted,
         )
@@ -500,8 +532,8 @@ class TestBuildQuoteEmbedCard:
         card = client._build_link_card(tweet)
 
         assert card is not None
-        assert card.external.uri == "https://twitter.com/MLS/status/999"
-        assert card.external.title == "@MLS"
+        assert card.external.uri == "https://twitter.com/handle/status/999"
+        assert card.external.title == "Display Name (@handle)"
 
 
 class TestPost:
@@ -641,7 +673,7 @@ class TestPrepareVideo:
             text="photo only",
             media=[MediaItem(url="https://pbs.twimg.com/1.jpg", type="photo")],
         )
-        data, alt, w, h = client._prepare_video(tweet)
+        data, _alt, _w, _h = client._prepare_video(tweet)
         assert data is None
 
     def test_video_without_variants_returns_none(self) -> None:
@@ -651,7 +683,7 @@ class TestPrepareVideo:
             text="video no variants",
             media=[MediaItem(url="https://pbs.twimg.com/thumb.jpg", type="video")],
         )
-        data, alt, w, h = client._prepare_video(tweet)
+        data, _alt, _w, _h = client._prepare_video(tweet)
         assert data is None
 
     @patch("bot.bluesky_client.download_video", return_value=b"\x00\x00video-bytes")
@@ -703,7 +735,7 @@ class TestPrepareVideo:
             )],
         )
         with patch("bot.bluesky_client.get_video_dimensions", return_value=(1080, 1920)) as mock_gvd:
-            data, alt, w, h = client._prepare_video(tweet)
+            _data, _alt, w, h = client._prepare_video(tweet)
             mock_gvd.assert_called_once_with(b"\x00\x00video-bytes")
         assert w == 1080
         assert h == 1920
@@ -730,12 +762,12 @@ class TestPrepareVideo:
                 ],
             )],
         )
-        data, alt, w, h = client._prepare_video(tweet)
+        data, _alt, w, h = client._prepare_video(tweet)
         assert data == b"\x00\x00video-bytes"
         assert w == 1920
         assert h == 1080
 
-    @patch("bot.bluesky_client.download_video", side_effect=Exception("timeout"))
+    @patch("bot.bluesky_client.download_video", side_effect=requests.ConnectionError("timeout"))
     @patch("bot.bluesky_client.select_best_variant", return_value={
         "content_type": "video/mp4",
         "url": "https://video.twimg.com/v/hi.mp4",
@@ -751,7 +783,7 @@ class TestPrepareVideo:
                 variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
             )],
         )
-        data, alt, w, h = client._prepare_video(tweet)
+        data, _alt, _w, _h = client._prepare_video(tweet)
         assert data is None
 
     @patch("bot.bluesky_client.select_best_variant", return_value=None)
@@ -766,7 +798,7 @@ class TestPrepareVideo:
                 variants=[{"content_type": "application/x-mpegURL", "url": "https://video.twimg.com/v/playlist.m3u8"}],
             )],
         )
-        data, alt, w, h = client._prepare_video(tweet)
+        data, _alt, _w, _h = client._prepare_video(tweet)
         assert data is None
 
     @patch("bot.bluesky_client.download_video", return_value=b"\x00gif-bytes")
@@ -786,7 +818,7 @@ class TestPrepareVideo:
                 variants=[{"content_type": "video/mp4", "bit_rate": 0, "url": "https://video.twimg.com/g/gif.mp4"}],
             )],
         )
-        data, alt, w, h = client._prepare_video(tweet)
+        data, _alt, _w, _h = client._prepare_video(tweet)
         assert data == b"\x00gif-bytes"
 
 
@@ -856,7 +888,7 @@ class TestPostVideo:
         assert ar.width == 1920
         assert ar.height == 1080
 
-    @patch("bot.bluesky_client.download_video", side_effect=Exception("fail"))
+    @patch("bot.bluesky_client.download_video", side_effect=requests.ConnectionError("fail"))
     @patch("bot.bluesky_client.select_best_variant", return_value={
         "content_type": "video/mp4",
         "url": "https://video.twimg.com/v/hi.mp4",
@@ -895,7 +927,7 @@ class TestPostVideo:
     ) -> None:
         """When Bluesky rejects the video (e.g. too long), fall back to send_post."""
         client = BlueskyClient()
-        client._client.send_video = MagicMock(side_effect=Exception("video too long"))
+        client._client.send_video = MagicMock(side_effect=BadRequestError())
         client._client.send_post = MagicMock()
 
         tweet = Tweet(
@@ -930,7 +962,7 @@ class TestPostVideo:
     ) -> None:
         """When send_video fails and tweet has a /video/ URL, produce a link card."""
         client = BlueskyClient()
-        client._client.send_video = MagicMock(side_effect=Exception("rejected"))
+        client._client.send_video = MagicMock(side_effect=BadRequestError())
         client._client.send_post = MagicMock()
 
         tweet = Tweet(
@@ -1001,7 +1033,7 @@ class TestBuildLinkCardVideoFallback:
 
 
 class TestMultiPartPost:
-    """Tests for the (k/n) thread-splitting behaviour on long tweets."""
+    """Tests for the thread-splitting behaviour on long tweets."""
 
     # 62 words × 5 chars + 61 spaces = 371 graphemes — reliably over the 300 limit.
     _LONG_TEXT = " ".join(["hello"] * 62)
@@ -1066,15 +1098,14 @@ class TestMultiPartPost:
             _, kwargs = call
             assert kwargs.get("embed") is None
 
-    def test_short_tweet_single_post_no_suffix(self) -> None:
-        """Single-post tweets are unaffected — no (1/1) suffix added."""
+    def test_no_numbering_suffix_added(self) -> None:
+        """Bluesky numbers threads itself — the bot must not add ``(k/n)``."""
         client = self._make_client()
-        tweet = Tweet(id="1", text="Short tweet")
+        tweet = Tweet(id="1", text=self._LONG_TEXT)
         client.post(tweet)
-        assert client._client.send_post.call_count == 1
-        args, _ = client._client.send_post.call_args
-        tb = args[0]
-        assert "(1/1)" not in tb.build_text()
+        for call in client._client.send_post.call_args_list:
+            args, _ = call
+            assert not re.search(r" \(\d+/\d+\)$", args[0].build_text())
 
     @patch.object(BlueskyClient, "login")
     def test_first_chunk_inherits_caller_parent_ref(self, mock_login: MagicMock) -> None:
@@ -1308,7 +1339,7 @@ class TestMixedMediaPost:
         # Return value is the last video reply
         assert result.tip.uri == "at://did/video/2"
 
-    @patch("bot.bluesky_client.download_video", side_effect=Exception("timeout"))
+    @patch("bot.bluesky_client.download_video", side_effect=requests.ConnectionError("timeout"))
     @patch("bot.bluesky_client.select_best_variant", return_value={
         "content_type": "video/mp4",
         "url": "https://video.twimg.com/v/hi.mp4",
@@ -1369,7 +1400,7 @@ class TestMixedMediaPost:
         client._client.send_post = MagicMock(
             return_value=SimpleNamespace(uri="at://did/post/1", cid="cid1")
         )
-        client._client.send_video = MagicMock(side_effect=Exception("rejected"))
+        client._client.send_video = MagicMock(side_effect=BadRequestError())
 
         tweet = Tweet(
             id="1",
@@ -1543,10 +1574,10 @@ class TestPrepareSingleVideo:
             type="video",
             variants=[{"content_type": "application/x-mpegURL", "url": "https://video.twimg.com/v/playlist.m3u8"}],
         )
-        data, alt, w, h = BlueskyClient._prepare_single_video(item)
+        data, _alt, _w, _h = BlueskyClient._prepare_single_video(item)
         assert data is None
 
-    @patch("bot.bluesky_client.download_video", side_effect=Exception("fail"))
+    @patch("bot.bluesky_client.download_video", side_effect=requests.ConnectionError("fail"))
     @patch("bot.bluesky_client.select_best_variant", return_value={
         "content_type": "video/mp4",
         "url": "https://video.twimg.com/v/hi.mp4",
@@ -1557,7 +1588,7 @@ class TestPrepareSingleVideo:
             type="video",
             variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
         )
-        data, alt, w, h = BlueskyClient._prepare_single_video(item)
+        data, _alt, _w, _h = BlueskyClient._prepare_single_video(item)
         assert data is None
 
 

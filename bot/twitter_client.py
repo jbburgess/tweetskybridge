@@ -70,9 +70,10 @@ class TwitterClient:
                 id=user_id,
                 max_results=max_results,
                 exclude=["retweets", "replies"],
-                tweet_fields=["created_at", "entities", "note_tweet", "referenced_tweets", "in_reply_to_user_id", "conversation_id"],
-                expansions=["attachments.media_keys", "referenced_tweets.id", "referenced_tweets.id.attachments.media_keys"],
+                tweet_fields=["created_at", "entities", "note_tweet", "referenced_tweets", "in_reply_to_user_id", "conversation_id", "author_id"],
+                expansions=["attachments.media_keys", "referenced_tweets.id", "referenced_tweets.id.attachments.media_keys", "referenced_tweets.id.author_id"],
                 media_fields=["url", "preview_image_url", "type", "alt_text", "variants", "width", "height"],
+                user_fields=["name", "username"],
             )
         except tweepy.TooManyRequests:
             log.warning("Hit Twitter rate limit, skipping this run")
@@ -96,6 +97,12 @@ class TwitterClient:
         if resp.includes and "tweets" in resp.includes:
             for qt in resp.includes["tweets"]:
                 included_tweets[str(qt.id)] = qt
+
+        # Build a lookup from user ID → user object (for quoted tweet author names)
+        users_lookup: dict[str, tweepy.User] = {}
+        if resp.includes and "users" in resp.includes:
+            for u in resp.includes["users"]:
+                users_lookup[str(u.id)] = u
 
         tweets: list[Tweet] = []
         for t in resp.data:
@@ -196,6 +203,8 @@ class TwitterClient:
                     text=getattr(qt_obj, "text", "") or "",
                     media=qt_media,
                     urls=qt_urls,
+                    author_name=getattr(users_lookup.get(str(getattr(qt_obj, "author_id", "") or "")), "name", "") or "",
+                    author_username=getattr(users_lookup.get(str(getattr(qt_obj, "author_id", "") or "")), "username", "") or "",
                 )
                 break
 
@@ -207,6 +216,9 @@ class TwitterClient:
                 reply_to_tweet_id=reply_to_tweet_id,
                 conversation_id=str(getattr(t, "conversation_id", None) or t.id),
                 quoted_tweet=quoted_tweet,
+                edit_history_tweet_ids=[
+                    str(eid) for eid in (getattr(t, "edit_history_tweet_ids", None) or [])
+                ],
             ))
 
         log.info("Fetched %d tweets from @%s", len(tweets), config.cfg.TWITTER_HANDLE)

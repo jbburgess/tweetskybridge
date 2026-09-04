@@ -106,10 +106,72 @@ def main() -> None:
         if rec is not None
     }
 
+    # Pre-build a set of tweet IDs that have a reply in the current fetch batch.  This lets
+    # edit-detection identify thread-root edits even when the downstream reply hasn't been
+    # mirrored yet (i.e. both tweets appear in the same run for the first time).
+    current_batch_reply_targets: set[str] = {
+        t.reply_to_tweet_id for t in tweets if t.reply_to_tweet_id
+    }
+
     new_count = 0
     for tweet in tweets:
         if tweet.id in post_map:
             continue
+
+        # Detect edits: check if any prior version of this tweet was already mirrored
+        replaced_id: str | None = None
+        if config.cfg.EDIT_SYNC_ENABLED and len(tweet.edit_history_tweet_ids) > 1:
+            for prev_id in tweet.edit_history_tweet_ids[:-1]:  # all IDs except the current one
+                if prev_id in post_map:
+                    replaced_id = prev_id
+                    break
+
+        if replaced_id is not None:
+            # Check for downstream replies before deciding what to do.
+            # 1. Historical: any previously-mirrored tweet recorded as a reply to the original.
+            # 2. Current batch: any tweet in this run's fetch that replies to the original.
+            has_downstream_replies = (
+                any(
+                    isinstance(rec, dict) and rec.get("reply_to") == replaced_id
+                    for rec in post_map.values()
+                )
+                or replaced_id in current_batch_reply_targets
+            )
+
+            if has_downstream_replies:
+                # Deleting the original Bluesky post would orphan the existing reply chain.
+                # Leave the original intact and mark the edit as seen so it is never retried.
+                log.warning(
+                    "Tweet %s is an edit of %s but the original has downstream replies on Bluesky; "
+                    "skipping edit to preserve thread continuity",
+                    tweet.id, replaced_id,
+                )
+                post_map[tweet.id] = None  # mark seen; prevents re-processing on future runs
+                continue
+
+            log.info(
+                "Tweet %s is an edit of previously-mirrored tweet %s — deleting original Bluesky post",
+                tweet.id, replaced_id,
+            )
+            original_rec = post_map.get(replaced_id)
+            if original_rec is not None:
+                if original_rec.get("root") and original_rec["root"].get("uri"):
+                    try:
+                        bluesky.delete_post(original_rec["root"]["uri"])
+                    except Exception:
+                        log.exception(
+                            "Failed to delete original Bluesky post for replaced tweet %s; "
+                            "proceeding to mirror edit anyway",
+                            replaced_id,
+                        )
+                else:
+                    log.warning(
+                        "Original tweet %s has no mapped Bluesky URI; skipping deletion",
+                        replaced_id,
+                    )
+            del post_map[replaced_id]
+            threads.pop(replaced_id, None)
+
         log.info("Reposting tweet %s: %s", tweet.id, tweet.text[:60])
 
         parent_ref: BlueskyPostRef | None = None
@@ -145,6 +207,7 @@ def main() -> None:
         post_map[tweet.id] = {
             "root": {"uri": thread.root.uri, "cid": thread.root.cid},
             "tip": {"uri": thread.tip.uri, "cid": thread.tip.cid},
+            "reply_to": tweet.reply_to_tweet_id,  # None for standalone posts; used for edit detection
         }
         new_count += 1
 

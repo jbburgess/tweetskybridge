@@ -5,8 +5,14 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 from atproto import models
-from atproto_client.exceptions import BadRequestError, InvokeTimeoutError, NetworkError, RequestException
+from atproto_client.exceptions import (
+    BadRequestError,
+    InvokeTimeoutError,
+    NetworkError,
+    RequestException,
+)
 from atproto_client.models.blob_ref import BlobRef
 
 from bot import config
@@ -54,7 +60,7 @@ class TestLogin:
             nonlocal call_count
             call_count += 1
             if "session_string" in kwargs:
-                raise Exception("expired")
+                raise BadRequestError()
             # password login succeeds (called with positional args)
 
         with patch.object(client._client, "login", side_effect=side_effect):
@@ -280,7 +286,7 @@ class TestBuildImageEmbed:
         assert embed is not None
         assert len(embed.images) == 4
 
-    @patch("bot.bluesky_client.download_image", side_effect=Exception("timeout"))
+    @patch("bot.bluesky_client.download_image", side_effect=requests.ConnectionError("timeout"))
     def test_skips_failed_downloads(self, mock_dl: MagicMock) -> None:
         client = BlueskyClient()
         tweet = Tweet(
@@ -667,7 +673,7 @@ class TestPrepareVideo:
             text="photo only",
             media=[MediaItem(url="https://pbs.twimg.com/1.jpg", type="photo")],
         )
-        data, alt, w, h = client._prepare_video(tweet)
+        data, _alt, _w, _h = client._prepare_video(tweet)
         assert data is None
 
     def test_video_without_variants_returns_none(self) -> None:
@@ -677,7 +683,7 @@ class TestPrepareVideo:
             text="video no variants",
             media=[MediaItem(url="https://pbs.twimg.com/thumb.jpg", type="video")],
         )
-        data, alt, w, h = client._prepare_video(tweet)
+        data, _alt, _w, _h = client._prepare_video(tweet)
         assert data is None
 
     @patch("bot.bluesky_client.download_video", return_value=b"\x00\x00video-bytes")
@@ -729,7 +735,7 @@ class TestPrepareVideo:
             )],
         )
         with patch("bot.bluesky_client.get_video_dimensions", return_value=(1080, 1920)) as mock_gvd:
-            data, alt, w, h = client._prepare_video(tweet)
+            _data, _alt, w, h = client._prepare_video(tweet)
             mock_gvd.assert_called_once_with(b"\x00\x00video-bytes")
         assert w == 1080
         assert h == 1920
@@ -756,12 +762,12 @@ class TestPrepareVideo:
                 ],
             )],
         )
-        data, alt, w, h = client._prepare_video(tweet)
+        data, _alt, w, h = client._prepare_video(tweet)
         assert data == b"\x00\x00video-bytes"
         assert w == 1920
         assert h == 1080
 
-    @patch("bot.bluesky_client.download_video", side_effect=Exception("timeout"))
+    @patch("bot.bluesky_client.download_video", side_effect=requests.ConnectionError("timeout"))
     @patch("bot.bluesky_client.select_best_variant", return_value={
         "content_type": "video/mp4",
         "url": "https://video.twimg.com/v/hi.mp4",
@@ -777,7 +783,7 @@ class TestPrepareVideo:
                 variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
             )],
         )
-        data, alt, w, h = client._prepare_video(tweet)
+        data, _alt, _w, _h = client._prepare_video(tweet)
         assert data is None
 
     @patch("bot.bluesky_client.select_best_variant", return_value=None)
@@ -792,7 +798,7 @@ class TestPrepareVideo:
                 variants=[{"content_type": "application/x-mpegURL", "url": "https://video.twimg.com/v/playlist.m3u8"}],
             )],
         )
-        data, alt, w, h = client._prepare_video(tweet)
+        data, _alt, _w, _h = client._prepare_video(tweet)
         assert data is None
 
     @patch("bot.bluesky_client.download_video", return_value=b"\x00gif-bytes")
@@ -812,7 +818,7 @@ class TestPrepareVideo:
                 variants=[{"content_type": "video/mp4", "bit_rate": 0, "url": "https://video.twimg.com/g/gif.mp4"}],
             )],
         )
-        data, alt, w, h = client._prepare_video(tweet)
+        data, _alt, _w, _h = client._prepare_video(tweet)
         assert data == b"\x00gif-bytes"
 
 
@@ -882,7 +888,7 @@ class TestPostVideo:
         assert ar.width == 1920
         assert ar.height == 1080
 
-    @patch("bot.bluesky_client.download_video", side_effect=Exception("fail"))
+    @patch("bot.bluesky_client.download_video", side_effect=requests.ConnectionError("fail"))
     @patch("bot.bluesky_client.select_best_variant", return_value={
         "content_type": "video/mp4",
         "url": "https://video.twimg.com/v/hi.mp4",
@@ -921,7 +927,7 @@ class TestPostVideo:
     ) -> None:
         """When Bluesky rejects the video (e.g. too long), fall back to send_post."""
         client = BlueskyClient()
-        client._client.send_video = MagicMock(side_effect=Exception("video too long"))
+        client._client.send_video = MagicMock(side_effect=BadRequestError())
         client._client.send_post = MagicMock()
 
         tweet = Tweet(
@@ -956,7 +962,7 @@ class TestPostVideo:
     ) -> None:
         """When send_video fails and tweet has a /video/ URL, produce a link card."""
         client = BlueskyClient()
-        client._client.send_video = MagicMock(side_effect=Exception("rejected"))
+        client._client.send_video = MagicMock(side_effect=BadRequestError())
         client._client.send_post = MagicMock()
 
         tweet = Tweet(
@@ -1333,7 +1339,7 @@ class TestMixedMediaPost:
         # Return value is the last video reply
         assert result.tip.uri == "at://did/video/2"
 
-    @patch("bot.bluesky_client.download_video", side_effect=Exception("timeout"))
+    @patch("bot.bluesky_client.download_video", side_effect=requests.ConnectionError("timeout"))
     @patch("bot.bluesky_client.select_best_variant", return_value={
         "content_type": "video/mp4",
         "url": "https://video.twimg.com/v/hi.mp4",
@@ -1394,7 +1400,7 @@ class TestMixedMediaPost:
         client._client.send_post = MagicMock(
             return_value=SimpleNamespace(uri="at://did/post/1", cid="cid1")
         )
-        client._client.send_video = MagicMock(side_effect=Exception("rejected"))
+        client._client.send_video = MagicMock(side_effect=BadRequestError())
 
         tweet = Tweet(
             id="1",
@@ -1568,10 +1574,10 @@ class TestPrepareSingleVideo:
             type="video",
             variants=[{"content_type": "application/x-mpegURL", "url": "https://video.twimg.com/v/playlist.m3u8"}],
         )
-        data, alt, w, h = BlueskyClient._prepare_single_video(item)
+        data, _alt, _w, _h = BlueskyClient._prepare_single_video(item)
         assert data is None
 
-    @patch("bot.bluesky_client.download_video", side_effect=Exception("fail"))
+    @patch("bot.bluesky_client.download_video", side_effect=requests.ConnectionError("fail"))
     @patch("bot.bluesky_client.select_best_variant", return_value={
         "content_type": "video/mp4",
         "url": "https://video.twimg.com/v/hi.mp4",
@@ -1582,7 +1588,7 @@ class TestPrepareSingleVideo:
             type="video",
             variants=[{"content_type": "video/mp4", "url": "https://video.twimg.com/v/hi.mp4"}],
         )
-        data, alt, w, h = BlueskyClient._prepare_single_video(item)
+        data, _alt, _w, _h = BlueskyClient._prepare_single_video(item)
         assert data is None
 
 

@@ -4,8 +4,16 @@ import re
 
 import pytest
 
-from bot.text import _grapheme_len, _HASHTAG_RE, _split_into_chunks, build_text_builder, resolve_urls, split_text_for_thread, truncate
 from bot.models import MediaItem, Tweet
+from bot.text import (
+    _HASHTAG_RE,
+    _grapheme_len,
+    _split_into_chunks,
+    build_text_builder,
+    resolve_urls,
+    split_text_for_thread,
+    truncate,
+)
 
 pytestmark = pytest.mark.unit
 

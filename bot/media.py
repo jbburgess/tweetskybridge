@@ -141,7 +141,7 @@ def get_image_dimensions(data: bytes) -> tuple[int, int]:
     try:
         with PILImage.open(io.BytesIO(data)) as im:
             return im.size  # (width, height)
-    except Exception:
+    except (OSError, ValueError):
         return 0, 0
 
 

@@ -216,8 +216,8 @@ class BlueskyClient:
     ) -> PostedThread:
         """Create a Bluesky post (or reply thread) from a Tweet.
 
-        Long tweets are split into a chain of reply posts with ``(k/n)``
-        suffixes.  Media is attached to the first post only.  When
+        Long tweets are split into a chain of reply posts (Bluesky numbers
+        threaded posts itself).  Media is attached to the first post only.  When
         *quoted_ref* is supplied (a self-quote whose target the bot already
         mirrored), the first post embeds that Bluesky record natively instead
         of a link card.  Returns the root (first) and tip (last) post refs so

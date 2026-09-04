@@ -151,25 +151,12 @@ def split_text_for_thread(
 ) -> list[str]:
     """Split *text* into Bluesky-sized chunks for a reply thread.
 
-    If *text* fits within *limit* graphemes, a single-element list is returned
-    with no suffix added.  Otherwise each chunk is suffixed with `` (k/n)``
-    (counted against the limit) so no chunk exceeds it.
+    Bluesky numbers threaded posts itself, so no position suffix is added.
     """
     if _grapheme_len(text) <= limit:
         return [text]
 
-    # Determine the suffix budget iteratively; converges in ≤ 2 passes.
-    # Start with 8 chars, which covers " (k/n)" for n up to 99.
-    suffix_budget = 8
-    for _ in range(3):
-        raw_chunks = _split_into_chunks(text, limit - suffix_budget)
-        n = len(raw_chunks)
-        actual_budget = _grapheme_len(f" ({n}/{n})")
-        if actual_budget == suffix_budget:
-            break
-        suffix_budget = actual_budget
-
-    return [f"{chunk} ({k}/{n})" for k, chunk in enumerate(raw_chunks, 1)]
+    return _split_into_chunks(text, limit)
 
 
 def _append_text_with_tags(

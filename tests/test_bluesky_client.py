@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -1026,7 +1027,7 @@ class TestBuildLinkCardVideoFallback:
 
 
 class TestMultiPartPost:
-    """Tests for the (k/n) thread-splitting behaviour on long tweets."""
+    """Tests for the thread-splitting behaviour on long tweets."""
 
     # 62 words × 5 chars + 61 spaces = 371 graphemes — reliably over the 300 limit.
     _LONG_TEXT = " ".join(["hello"] * 62)
@@ -1091,15 +1092,14 @@ class TestMultiPartPost:
             _, kwargs = call
             assert kwargs.get("embed") is None
 
-    def test_short_tweet_single_post_no_suffix(self) -> None:
-        """Single-post tweets are unaffected — no (1/1) suffix added."""
+    def test_no_numbering_suffix_added(self) -> None:
+        """Bluesky numbers threads itself — the bot must not add ``(k/n)``."""
         client = self._make_client()
-        tweet = Tweet(id="1", text="Short tweet")
+        tweet = Tweet(id="1", text=self._LONG_TEXT)
         client.post(tweet)
-        assert client._client.send_post.call_count == 1
-        args, _ = client._client.send_post.call_args
-        tb = args[0]
-        assert "(1/1)" not in tb.build_text()
+        for call in client._client.send_post.call_args_list:
+            args, _ = call
+            assert not re.search(r" \(\d+/\d+\)$", args[0].build_text())
 
     @patch.object(BlueskyClient, "login")
     def test_first_chunk_inherits_caller_parent_ref(self, mock_login: MagicMock) -> None:
